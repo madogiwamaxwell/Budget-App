@@ -1,0 +1,524 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Ledger">
+<meta name="theme-color" content="#2f6fd6">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
+<title>Budget Ledger</title>
+<style>
+:root{--bg:#f6f5f2;--card:#fff;--tx:#1f1f1e;--mut:#6b6a66;--bd:#e3e1db;--acc:#2f6fd6;--accbg:#e8f0fc;--ok:#2d7a3e;--okbg:#e6f3e8;--warn:#b0561a;--warnbg:#fbeee2}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#161615;--card:#212120;--tx:#ecebe7;--mut:#a3a29c;--bd:#33332f;--acc:#7aa7f0;--accbg:#1f2c44;--ok:#6fcf86;--okbg:#1d3324;--warn:#f0a56e;--warnbg:#3a2a1d}}
+:root[data-theme="dark"]{--bg:#161615;--card:#212120;--tx:#ecebe7;--mut:#a3a29c;--bd:#33332f;--acc:#7aa7f0;--accbg:#1f2c44;--ok:#6fcf86;--okbg:#1d3324;--warn:#f0a56e;--warnbg:#3a2a1d}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Hiragino Sans",sans-serif}
+body{padding-bottom:calc(76px + env(safe-area-inset-bottom))}
+header{position:sticky;top:0;z-index:5;background:var(--bg);padding:calc(10px + env(safe-area-inset-top)) 16px 8px;border-bottom:.5px solid var(--bd)}
+header h1{font-size:18px;font-weight:500;margin:0 0 6px}
+.mn{display:flex;align-items:center;gap:10px}
+.mn b{font-weight:500;min-width:92px;text-align:center}
+main{padding:12px 16px;max-width:760px;margin:0 auto}
+button,select,input,textarea{font:inherit;color:var(--tx)}
+button{background:var(--card);border:.5px solid var(--bd);border-radius:8px;padding:8px 12px;cursor:pointer}
+button.pri{background:var(--acc);border-color:var(--acc);color:#fff}
+button.dng{color:var(--warn)}
+input,select,textarea{background:var(--card);border:.5px solid var(--bd);border-radius:8px;padding:8px 10px;width:100%}
+textarea{resize:vertical}
+label{display:block;font-size:12px;color:var(--mut);margin:10px 0 4px}
+.card{background:var(--card);border:.5px solid var(--bd);border-radius:12px;overflow:hidden;margin:0 0 12px}
+.mut{color:var(--mut);font-size:13px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.grow{flex:1;min-width:0}
+.tx{display:flex;justify-content:space-between;gap:10px;padding:10px 12px;border-bottom:.5px solid var(--bd);cursor:pointer}
+.tx:last-child{border-bottom:0}
+.tx .m{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chip{display:inline-block;font-size:11px;padding:1px 8px;border-radius:8px;background:var(--accbg);color:var(--acc);margin-right:4px}
+.chip.w{background:var(--warnbg);color:var(--warn)}
+.chip.o{background:var(--okbg);color:var(--ok)}
+.met{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin:0 0 12px}
+.met div{background:var(--card);border:.5px solid var(--bd);border-radius:8px;padding:10px 12px}
+.met small{display:block;font-size:12px;color:var(--mut)}
+.met b{font-size:18px;font-weight:500}
+.met input{border:0;padding:0;font-size:18px;font-weight:500;background:transparent}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{font-weight:500;color:var(--mut);text-align:right;padding:8px 8px;border-bottom:.5px solid var(--bd);font-size:12px}
+th:first-child,td:first-child{text-align:left}
+td{padding:7px 8px;border-bottom:.5px solid var(--bd);text-align:right}
+tr.g td{background:var(--bg);font-weight:500;cursor:pointer}
+td.ind{padding-left:20px}
+td input{width:84px;text-align:right;padding:4px 6px;font-size:13px}
+.bar{height:5px;border-radius:3px;background:var(--bd);min-width:50px}
+.bar i{display:block;height:5px;border-radius:3px}
+.ok{color:var(--ok)}.wn{color:var(--warn)}
+.seg{display:flex;margin:0 0 12px}
+.seg button{flex:1;border-radius:0}
+.seg button:first-child{border-radius:8px 0 0 8px}.seg button:last-child{border-radius:0 8px 8px 0}
+.seg button.on{background:var(--accbg);color:var(--acc);border-color:var(--acc)}
+nav{position:fixed;left:0;right:0;bottom:0;display:flex;background:var(--card);border-top:.5px solid var(--bd);padding-bottom:env(safe-area-inset-bottom);z-index:6}
+nav button{flex:1;border:0;border-radius:0;background:transparent;padding:12px 0;font-size:12px;color:var(--mut)}
+nav button.on{color:var(--acc);font-weight:500}
+.fab{position:fixed;right:16px;bottom:calc(74px + env(safe-area-inset-bottom));width:52px;height:52px;border-radius:26px;background:var(--acc);color:#fff;font-size:28px;line-height:1;border:0;z-index:7}
+#modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:20;align-items:flex-end;justify-content:center}
+#modal.on{display:flex}
+.sheet{background:var(--bg);width:100%;max-width:640px;max-height:92vh;overflow:auto;border-radius:16px 16px 0 0;padding:16px 16px calc(20px + env(safe-area-inset-bottom))}
+.sheet h3{margin:0 0 4px;font-size:17px;font-weight:500}
+#toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(140px + env(safe-area-inset-bottom));background:var(--tx);color:var(--bg);padding:8px 14px;border-radius:8px;font-size:13px;z-index:30;display:none;max-width:90%}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
+.rc{background:var(--card);border:.5px solid var(--bd);border-radius:12px;overflow:hidden;cursor:pointer}
+.rc img{width:100%;height:120px;object-fit:cover;display:block;background:var(--bd)}
+.rc div{padding:6px 8px;font-size:12px}
+.th{width:56px;height:56px;object-fit:cover;border-radius:8px;margin:4px 6px 0 0}
+.full{width:100%;border-radius:8px;margin:8px 0}
+.banner{background:var(--warnbg);color:var(--warn);border-radius:8px;padding:8px 12px;margin:0 0 12px;font-size:13px}
+.sub{display:flex;justify-content:space-between;padding:6px 12px 6px 24px;font-size:12px;color:var(--mut);cursor:pointer}
+.empty{text-align:center;color:var(--mut);padding:28px 12px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="modal" onclick="if(event.target.id==='modal')closeModal()"></div>
+<div id="toast"></div>
+<input type="file" id="cam" accept="image/*" capture="environment" hidden onchange="A.addPhotos(this)">
+<input type="file" id="lib" accept="image/*" multiple hidden onchange="A.addPhotos(this)">
+<input type="file" id="restore" accept=".json,application/json" hidden onchange="A.restore(this)">
+<script>
+const LS='budgetLedger.v1';
+const MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const yen=n=>(n<0?'-':'')+'¥'+Math.abs(Math.round(n)).toLocaleString('en-US');
+const pad=n=>String(n).padStart(2,'0');
+const ym=d=>d.getFullYear()+'-'+pad(d.getMonth()+1);
+const today=()=>{const d=new Date();return ym(d)+'-'+pad(d.getDate())};
+const isoOf=d=>ym(d)+'-'+pad(d.getDate());
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+const monthLabel=m=>{const p=m.split('-');return MN[+p[1]-1]+' '+p[0]};
+const addMonths=(m,n)=>{const p=m.split('-').map(Number);return ym(new Date(p[0],p[1]-1+n,1))};
+const norm=s=>String(s||'').normalize('NFKC').toLowerCase().trim();
+const dayDiff=(a,b)=>Math.abs((new Date(a)-new Date(b))/864e5);
+
+const DEFAULT_CATS=[
+['rent','Rent',''],['shared_in','Shared account contribution',''],
+['electricity','Electricity','Utilities'],['gas','Gas','Utilities'],['internet','Internet','Utilities'],
+['cell_us','Cellphone (US)','Phone'],['cell_jp','Cellphone (JP)','Phone'],
+['car_ins','Car insurance','Insurance'],['renters_ins','Renters insurance','Insurance'],
+['grocery','Grocery','Food'],['lunch','Lunch','Food'],['biz_lunch','Business lunch','Food'],['bulk','Bulk','Food'],['drinks','Drinks','Food'],['restaurant','Restaurant','Food'],
+['spotify','Spotify','Entertainment'],['prime','Amazon Prime (JP)','Entertainment'],['cloud','Cloud (Apple, etc.)','Entertainment'],['bunpro','Bunpro','Entertainment'],['claude','Claude','Entertainment'],['nintendo','Nintendo','Entertainment'],['ent_misc','Misc (entertainment)','Entertainment'],
+['metro','Metro','Travel'],['tolls','Tolls','Travel'],['ride','Ride share','Travel'],['parking','Parking','Travel'],['flights','Flights / trains / car rentals','Travel'],['hotels','Hotels / Airbnb','Travel'],['travel_misc','Misc (travel)','Travel'],
+['physical','Physical','Health'],['mental','Mental','Health'],['dental','Dental','Health'],
+['shopping','Shopping',''],['haircut','Haircut',''],['misc','Misc','']
+].map(a=>({id:a[0],name:a[1],g:a[2]}));
+const DEFAULT_RULES=[
+['ローソン','restaurant'],['lawson','restaurant'],['ファミリーマート','restaurant'],['ファミマ','restaurant'],['familymart','restaurant'],['セブン','restaurant'],['7-eleven','restaurant'],['ミニストップ','restaurant'],['ウーバーイーツ','restaurant'],['uber eats','restaurant'],['サカガミ','restaurant'],
+['ライフ','grocery'],['東急ストア','grocery'],['旬八青果店','grocery'],['マルエツ','grocery'],['明治屋','grocery'],['カルディ','grocery'],
+['ツルハ','bulk'],['mancini','biz_lunch'],['赤坂biz','biz_lunch'],
+['amazonプライム','prime'],['amazon prime','prime'],['spotify','spotify'],['bunpro','bunpro'],['claude','claude'],['anthropic','claude']
+].map(a=>({p:a[0],c:a[1]}));
+
+let S=load()||{cats:DEFAULT_CATS,rules:DEFAULT_RULES,tx:[],budgets:{},income:{},shared:{},receipts:[],month:ym(new Date()),lastBackup:0};
+let ui={tab:'ledger',scope:'my',q:'',open:null,collapsed:{},preview:null};
+function load(){try{const r=localStorage.getItem(LS);return r?JSON.parse(r):null}catch(e){return null}}
+function save(){try{localStorage.setItem(LS,JSON.stringify(S))}catch(e){toast('Could not save. Storage may be full.')}schedSnap()}
+const sdb=(typeof indexedDB==='undefined')?Promise.reject('none'):new Promise((res,rej)=>{const r=indexedDB.open('budgetLedgerSnaps',1);r.onupgradeneeded=()=>r.result.createObjectStore('s',{keyPath:'k'});r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});
+sdb.catch(()=>{});
+const sreq=(mode,fn)=>sdb.then(d=>new Promise((res,rej)=>{const t=d.transaction('s',mode);const q=fn(t.objectStore('s'));t.oncomplete=()=>res(q&&q.result);t.onerror=()=>rej(t.error)}));
+let snapT=0;
+function schedSnap(){clearTimeout(snapT);snapT=setTimeout(()=>snapNow(''),1500)}
+async function snapNow(label){
+  try{
+    if(!S.tx.length&&!Object.keys(S.budgets).length&&!Object.keys(S.income).length)return;
+    const now=Date.now(),k=label?'pre-'+now:today();
+    await sreq('readwrite',st=>st.put({k:k,t:now,label:label,n:S.tx.length,state:JSON.stringify(S)}));
+    await pruneSnaps();
+  }catch(e){}
+}
+async function pruneSnaps(){
+  const all=await sreq('readonly',st=>st.getAll());
+  const daily=all.filter(x=>!x.label).sort((a,b)=>b.t-a.t),special=all.filter(x=>x.label).sort((a,b)=>b.t-a.t);
+  const keep=new Set(daily.slice(0,30).map(x=>x.k));special.slice(0,5).forEach(x=>keep.add(x.k));
+  const cutoff=Date.now()-366*864e5,seen=new Set();
+  daily.slice(30).forEach(x=>{const m=x.k.slice(0,7);if(x.t>=cutoff&&!seen.has(m)){seen.add(m);keep.add(x.k)}});
+  const drop=all.filter(x=>!keep.has(x.k));
+  if(drop.length)await sreq('readwrite',st=>{drop.forEach(x=>st.delete(x.k))});
+}
+const armed={};
+function arm(key,msg){const n=Date.now();if(armed[key]&&n-armed[key]<5000){delete armed[key];return true}armed[key]=n;toast(msg);return false}
+function toast(t){const e=$('#toast');if(!e)return;e.textContent=t;e.style.display='block';clearTimeout(toast.t);toast.t=setTimeout(()=>e.style.display='none',2600)}
+
+const idb=(typeof indexedDB==='undefined')?Promise.reject('none'):new Promise((res,rej)=>{const r=indexedDB.open('budgetLedgerPhotos',1);r.onupgradeneeded=()=>r.result.createObjectStore('p');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});
+idb.catch(()=>{});
+async function pPut(id,blob){const d=await idb;return new Promise((res,rej)=>{const t=d.transaction('p','readwrite');t.objectStore('p').put(blob,id);t.oncomplete=res;t.onerror=()=>rej(t.error)})}
+async function pGet(id){const d=await idb;return new Promise((res,rej)=>{const q=d.transaction('p').objectStore('p').get(id);q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error)})}
+async function pDel(id){try{const d=await idb;return new Promise(res=>{const t=d.transaction('p','readwrite');t.objectStore('p').delete(id);t.oncomplete=res;t.onerror=res})}catch(e){}}
+const urlCache={};
+async function hydrate(){const els=document.querySelectorAll('img[data-pid]');for(const el of els){const id=el.dataset.pid;try{if(!urlCache[id]){const b=await pGet(id);if(!b)continue;urlCache[id]=URL.createObjectURL(b)}el.src=urlCache[id]}catch(e){}}}
+async function compress(file){
+  let bmp;try{bmp=await createImageBitmap(file)}catch(e){bmp=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=URL.createObjectURL(file)})}
+  const w=bmp.width,h=bmp.height,sc=Math.min(1,1600/Math.max(w,h));
+  const c=document.createElement('canvas');c.width=Math.round(w*sc);c.height=Math.round(h*sc);
+  c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);
+  return new Promise(r=>c.toBlob(r,'image/jpeg',0.72));
+}
+
+const catById=id=>S.cats.find(c=>c.id===id);
+const catName=id=>id?(catById(id)?catById(id).name:'Unknown'):'Needs a category';
+function autoCat(merchant){const m=norm(merchant);if(!m)return '';const rs=[...S.rules].sort((a,b)=>b.p.length-a.p.length);for(const r of rs){if(m.includes(norm(r.p)))return r.c}return ''}
+function ruleKey(merchant){const m=norm(merchant).replace(/[…\.]+$/,'');const w=m.split(/\s+/)[0];return w.length>=3?w:m}
+function catOpts(sel,blank){
+  let h=blank?'<option value="">Choose category…</option>':'';
+  const gs={},solo=[];S.cats.forEach(c=>{if(c.g){(gs[c.g]=gs[c.g]||[]).push(c)}else solo.push(c)});
+  for(const g in gs)h+='<optgroup label="'+esc(g)+'">'+gs[g].map(c=>'<option value="'+c.id+'"'+(c.id===sel?' selected':'')+'>'+esc(c.name)+'</option>').join('')+'</optgroup>';
+  h+='<optgroup label="Other">'+solo.map(c=>'<option value="'+c.id+'"'+(c.id===sel?' selected':'')+'>'+esc(c.name)+'</option>').join('')+'</optgroup>';
+  return h;
+}
+
+const DATE_RE=/(\d{4})\s*[\/\-.年]\s*(\d{1,2})\s*[\/\-.月]\s*(\d{1,2})/;
+const HAS_TEXT=/[^\d,\s\-¥円.]/;
+function parseAmt(tok){const t=String(tok).replace(/\u2212/g,'-').replace(/[¥円\s]/g,'');if(!/^-?[\d,]+$/.test(t)||!/\d/.test(t))return null;const n=parseInt(t.replace(/[^\d]/g,''),10);return isNaN(n)?null:n}
+function csvSplit(s){const o=[];let cur='',q=false;for(const ch of s){if(ch==='"')q=!q;else if(ch===','&&!q){o.push(cur);cur=''}else cur+=ch}o.push(cur);return o.map(x=>x.trim()).filter(Boolean)}
+function splitFields(s){
+  if(s.includes('\t'))return s.split(/\t+/).map(x=>x.trim()).filter(Boolean);
+  if(/^[^,]*,[^,]*,/.test(s)&&!/\s{2,}/.test(s))return csvSplit(s);
+  return s.split(/\s{2,}/).map(x=>x.trim()).filter(Boolean);
+}
+function parseStatement(text){
+  const out=[];let pend=null;
+  const push=(date,mer,amt)=>{mer=String(mer).replace(/\s+/g,' ').trim();if(date&&mer&&amt>0)out.push({date:date,merchant:mer,amount:amt})};
+  const tail=/^(.*?)\s+(-?[\d,\u2212]+)\s*円?$/;
+  for(const raw of text.split(/\r?\n/)){
+    const line=raw.normalize('NFKC').trim();if(!line)continue;
+    const dm=line.match(DATE_RE);
+    if(dm){
+      const date=dm[1]+'-'+pad(dm[2])+'-'+pad(dm[3]);
+      const rest=(line.slice(0,dm.index)+line.slice(dm.index+dm[0].length)).trim();
+      const toks=splitFields(rest);
+      const mi=toks.findIndex(t=>HAS_TEXT.test(t));
+      if(mi>=0){
+        const mer=toks[mi];let amt=null;
+        for(let k=mi+1;k<toks.length;k++){const a=parseAmt(toks[k]);if(a!==null){amt=a;break}}
+        if(amt!==null){push(date,mer,amt);pend=null;continue}
+        const tm=mer.match(tail);
+        if(tm&&parseAmt(tm[2])!==null&&HAS_TEXT.test(tm[1])){push(date,tm[1],parseAmt(tm[2]));pend=null;continue}
+        pend={date:date,merchant:mer};continue;
+      }
+      pend={date:date};continue;
+    }
+    if(pend){
+      if(!pend.merchant){
+        const tm=line.match(tail);
+        if(tm&&parseAmt(tm[2])!==null&&HAS_TEXT.test(tm[1])){push(pend.date,tm[1],parseAmt(tm[2]));pend=null;continue}
+        if(HAS_TEXT.test(line)){pend.merchant=line;continue}
+      }else{
+        const a=parseAmt(line);if(a!==null){push(pend.date,pend.merchant,a);pend=null;continue}
+      }
+    }
+  }
+  return out;
+}
+
+function eff(map,m){if(!map)return undefined;const ks=Object.keys(map).filter(k=>k<=m).sort();return ks.length?map[ks[ks.length-1]]:undefined}
+const monthTx=(m,sc)=>S.tx.filter(t=>t.date.startsWith(m)&&(sc==='shared'?t.from==='shared':t.from!=='shared'));
+function actualBy(m,sc){const a={};monthTx(m,sc).forEach(t=>{const k=t.cat||'_none';a[k]=(a[k]||0)+t.amount});return a}
+function structure(){const out=[],seen={};S.cats.forEach(c=>{if(!c.g)out.push({leaf:c});else{if(!seen[c.g]){seen[c.g]={name:c.g,cats:[]};out.push(seen[c.g])}seen[c.g].cats.push(c)}});return out}
+const sum=a=>a.reduce((x,y)=>x+y,0);
+
+function candidates(r){
+  const taken=new Set(S.receipts.filter(x=>x.txId).map(x=>x.txId));
+  return S.tx.filter(t=>!taken.has(t.id)&&dayDiff(t.date,r.date)<=3).sort((a,b)=>{
+    const ea=(r.amount&&a.amount===r.amount)?0:1,eb=(r.amount&&b.amount===r.amount)?0:1;
+    return ea-eb||dayDiff(a.date,r.date)-dayDiff(b.date,r.date)});
+}
+function autoMatch(){let n=0;for(const r of S.receipts){if(r.txId||!r.amount)continue;const c=candidates(r).find(t=>t.amount===r.amount);if(c){r.txId=c.id;n++}}save();return n}
+
+function modal(h){$('#modal').innerHTML='<div class="sheet">'+h+'</div>';$('#modal').classList.add('on');hydrate()}
+function closeModal(){$('#modal').classList.remove('on');$('#modal').innerHTML=''}
+const A={};
+A.tab=t=>{ui.tab=t;render();window.scrollTo(0,0)};
+A.month=n=>{S.month=addMonths(S.month,n);save();render()};
+A.scope=s=>{ui.scope=s;render()};
+A.q=v=>{ui.q=v;render()};
+A.toggleGroup=g=>{ui.collapsed[g]=!ui.collapsed[g];render()};
+A.openCat=id=>{ui.open=ui.open===id?null:id;render()};
+A.setBudget=(id,v)=>{S.budgets[id]=S.budgets[id]||{};S.budgets[id][S.month]=parseInt(String(v).replace(/[^\d]/g,''),10)||0;save();render()};
+A.setIncome=v=>{S.income[S.month]=parseInt(String(v).replace(/[^\d]/g,''),10)||0;save();render()};
+A.setShared=v=>{S.shared[S.month]=parseInt(String(v).replace(/[^\d]/g,''),10)||0;save();render()};
+
+function header(){
+  const titles={ledger:'Ledger',month:'Month',trends:'Trends',receipts:'Receipts',settings:'Settings'};
+  const showM=['ledger','month','trends'].includes(ui.tab);
+  return '<header><h1>'+titles[ui.tab]+'</h1>'+(showM?'<div class="mn"><button aria-label="Previous month" onclick="A.month(-1)">‹</button><b>'+monthLabel(S.month)+'</b><button aria-label="Next month" onclick="A.month(1)">›</button></div>':'')+'</header>';
+}
+function nav(){
+  const t=[['ledger','Ledger'],['month','Month'],['trends','Trends'],['receipts','Receipts'],['settings','Settings']];
+  return '<nav>'+t.map(x=>'<button class="'+(ui.tab===x[0]?'on':'')+'" onclick="A.tab(\''+x[0]+'\')">'+x[1]+'</button>').join('')+'</nav>';
+}
+function render(){
+  const v={ledger:viewLedger,month:viewMonth,trends:viewTrends,receipts:viewReceipts,settings:viewSettings}[ui.tab]();
+  const fab=(ui.tab==='ledger')?'<button class="fab" aria-label="Add transaction" onclick="A.editTx()">+</button>':'';
+  $('#app').innerHTML=header()+'<main>'+v+'</main>'+fab+nav();
+  hydrate();
+}
+
+function recFor(id){return S.receipts.filter(r=>r.txId===id)}
+function viewLedger(){
+  const m=S.month;let list=S.tx.filter(t=>t.date.startsWith(m));
+  const need=list.filter(t=>!t.cat).length;
+  const q=norm(ui.q);if(q)list=list.filter(t=>norm(t.merchant).includes(q)||norm(catName(t.cat)).includes(q));
+  list.sort((a,b)=>b.date.localeCompare(a.date));
+  const days=S.lastBackup?(Date.now()-S.lastBackup)/864e5:999;
+  let h='';
+  if(S.tx.length&&days>7)h+='<div class="banner">No backup file saved in the last 7 days. Open Settings and export one.</div>';
+  if(need)h+='<div class="banner">'+need+' transaction'+(need>1?'s':'')+' need a category. Tap them to set one.</div>';
+  h+='<div class="row" style="margin:0 0 12px"><input class="grow" placeholder="Search merchant or category" value="'+esc(ui.q)+'" onchange="A.q(this.value)"><button onclick="A.openImport()">Import</button></div>';
+  if(!list.length)return h+'<div class="empty">No transactions in '+monthLabel(m)+'.<br>Tap + to add one, or Import to paste a statement.</div>';
+  const tot=sum(list.filter(t=>t.from!=='shared').map(t=>t.amount));
+  h+='<p class="mut" style="margin:0 0 8px">'+list.length+' transactions · '+yen(tot)+' from your own spending</p><div class="card">';
+  list.forEach(t=>{
+    const rc=recFor(t.id).length;
+    h+='<div class="tx" onclick="A.editTx(\''+t.id+'\')"><div class="grow"><div class="m">'+esc(t.merchant)+'</div><div class="mut">'+t.date.slice(5).replace('-','/')+' · <span class="chip'+(t.cat?'':' w')+'">'+esc(catName(t.cat))+'</span>'+(t.from==='shared'?'<span class="chip o">Shared</span>':'')+(rc?'<span class="chip">Receipt</span>':'')+'</div></div><div style="white-space:nowrap">'+yen(t.amount)+'</div></div>';
+  });
+  return h+'</div>';
+}
+
+A.editTx=id=>{
+  const t=id?S.tx.find(x=>x.id===id):{id:'',date:today(),merchant:'',amount:'',cat:'',from:'mine'};
+  const rc=id?recFor(id):[];
+  modal('<h3>'+(id?'Edit transaction':'Add transaction')+'</h3>'+
+  '<label>Date</label><input type="date" id="f_date" value="'+t.date+'">'+
+  '<label>Merchant</label><input id="f_mer" value="'+esc(t.merchant)+'" oninput="A.suggest()">'+
+  '<label>Amount (yen)</label><input id="f_amt" inputmode="numeric" value="'+(t.amount||'')+'">'+
+  '<label>Category</label><select id="f_cat">'+catOpts(t.cat,true)+'</select>'+
+  '<label>Paid from</label><select id="f_from"><option value="mine"'+(t.from!=='shared'?' selected':'')+'>My card or cash</option><option value="shared"'+(t.from==='shared'?' selected':'')+'>Shared account</option></select>'+
+  '<label><input type="checkbox" id="f_rem" checked style="width:auto"> Remember this merchant for next time</label>'+
+  (rc.length?'<div>'+rc.map(r=>'<img class="th" data-pid="'+r.id+'" onclick="A.viewReceipt(\''+r.id+'\')" alt="Receipt">').join('')+'</div>':'')+
+  '<div class="row" style="margin-top:14px"><button class="pri grow" onclick="A.saveTx(\''+(id||'')+'\')">Save</button>'+(id?'<button class="dng" onclick="A.delTx(\''+id+'\')">Delete</button>':'')+'<button onclick="closeModal()">Cancel</button></div>');
+};
+A.suggest=()=>{const c=autoCat($('#f_mer').value);const s=$('#f_cat');if(c&&!s.value)s.value=c};
+A.saveTx=id=>{
+  const date=$('#f_date').value,mer=$('#f_mer').value.trim(),amt=parseAmt($('#f_amt').value),cat=$('#f_cat').value,from=$('#f_from').value;
+  if(!date||!mer||!amt){toast('Enter a date, merchant, and amount.');return}
+  if(id){const t=S.tx.find(x=>x.id===id);Object.assign(t,{date:date,merchant:mer,amount:amt,cat:cat,from:from})}
+  else S.tx.push({id:uid(),date:date,merchant:mer,amount:amt,cat:cat,from:from});
+  if(cat&&$('#f_rem').checked&&!autoCat(mer))S.rules.push({p:ruleKey(mer),c:cat});
+  save();closeModal();render();
+};
+A.delTx=id=>{if(!arm('d'+id,'Tap Delete again to confirm.'))return;S.tx=S.tx.filter(t=>t.id!==id);S.receipts.forEach(r=>{if(r.txId===id)r.txId=''});save();closeModal();render()};
+
+A.openImport=()=>modal('<h3>Import transactions</h3><p class="mut">Paste statement text, or choose a CSV or text file. Dates need a four-digit year, such as 2026/05/15.</p>'+
+  '<textarea id="imp" rows="8" placeholder="Paste here"></textarea>'+
+  '<label>Or choose a file</label><input type="file" accept=".csv,.txt,text/*" onchange="A.readFile(this)">'+
+  '<label>Paid from</label><select id="imp_from"><option value="mine">My card or cash</option><option value="shared">Shared account</option></select>'+
+  '<div class="row" style="margin-top:14px"><button class="pri grow" onclick="A.previewImport()">Preview</button><button onclick="closeModal()">Cancel</button></div>');
+A.readFile=async inp=>{
+  const f=inp.files[0];if(!f)return;const buf=await f.arrayBuffer();let txt;
+  try{txt=new TextDecoder('utf-8',{fatal:true}).decode(buf)}catch(e){try{txt=new TextDecoder('shift_jis').decode(buf)}catch(e2){txt=''}}
+  $('#imp').value=txt;
+};
+A.previewImport=()=>{
+  const rows=parseStatement($('#imp').value),from=$('#imp_from').value;
+  if(!rows.length){toast('No transactions found. Check that each line has a date, merchant, and amount.');return}
+  rows.forEach(r=>{r.cat=autoCat(r.merchant);r.dup=S.tx.some(t=>t.date===r.date&&t.amount===r.amount&&norm(t.merchant)===norm(r.merchant));r.inc=!r.dup});
+  ui.preview={rows:rows,from:from};showPreview();
+};
+function showPreview(){
+  const p=ui.preview,n=p.rows.filter(r=>r.inc).length;
+  modal('<h3>Review '+p.rows.length+' transactions</h3><p class="mut">Rows already in your ledger are unchecked. Pick a category for anything flagged.</p><div class="card">'+
+  p.rows.map((r,i)=>'<div class="tx" style="cursor:default;flex-direction:column;gap:6px"><div class="row"><input type="checkbox" style="width:auto" '+(r.inc?'checked':'')+' onchange="A.pvChk('+i+',this.checked)"><div class="grow m">'+esc(r.merchant)+'</div><div>'+yen(r.amount)+'</div></div><div class="row"><span class="mut">'+r.date.slice(5).replace('-','/')+'</span>'+(r.dup?'<span class="chip w">Already added</span>':'')+'<select class="grow" onchange="A.pvCat('+i+',this.value)">'+catOpts(r.cat,true)+'</select></div></div>').join('')+'</div>'+
+  '<label><input type="checkbox" id="pv_rem" checked style="width:auto"> Remember merchants I categorize</label>'+
+  '<div class="row" style="margin-top:14px"><button class="pri grow" onclick="A.commitImport()">Add '+n+' transactions</button><button onclick="closeModal()">Cancel</button></div>');
+}
+A.pvChk=(i,v)=>{ui.preview.rows[i].inc=v;const y=$('.sheet .pri');if(y)y.textContent='Add '+ui.preview.rows.filter(r=>r.inc).length+' transactions'};
+A.pvCat=(i,v)=>{ui.preview.rows[i].cat=v};
+A.commitImport=()=>{
+  const p=ui.preview,rem=$('#pv_rem').checked;let n=0;
+  p.rows.forEach(r=>{if(!r.inc)return;S.tx.push({id:uid(),date:r.date,merchant:r.merchant,amount:r.amount,cat:r.cat,from:p.from});n++;
+    if(rem&&r.cat&&!autoCat(r.merchant))S.rules.push({p:ruleKey(r.merchant),c:r.cat})});
+  const first=p.rows.filter(r=>r.inc).map(r=>r.date.slice(0,7)).sort()[0];if(first)S.month=first;
+  const mt=autoMatch();save();closeModal();render();
+  toast(n+' added'+(mt?', '+mt+' receipt'+(mt>1?'s':'')+' matched':''));
+};
+
+function viewMonth(){
+  const m=S.month,sc=ui.scope,act=actualBy(m,sc);
+  const seg='<div class="seg"><button class="'+(sc==='my'?'on':'')+'" onclick="A.scope(\'my\')">My spending</button><button class="'+(sc==='shared'?'on':'')+'" onclick="A.scope(\'shared\')">Shared account</button></div>';
+  if(sc==='shared'){
+    const spent=sum(Object.values(act)),inn=eff(S.shared,m)||0;
+    let h=seg+'<div class="met"><div><small>Contributions in</small><input inputmode="numeric" value="'+inn+'" onchange="A.setShared(this.value)"></div><div><small>Spent</small><b>'+yen(spent)+'</b></div><div><small>Balance</small><b class="'+(inn-spent<0?'wn':'')+'">'+yen(inn-spent)+'</b></div></div>';
+    const rows=S.cats.filter(c=>act[c.id]).map(c=>'<tr><td>'+esc(c.name)+'</td><td>'+yen(act[c.id])+'</td></tr>').join('')+(act._none?'<tr><td class="wn">Needs a category</td><td>'+yen(act._none)+'</td></tr>':'');
+    return h+(rows?'<div class="card"><table><thead><tr><th>Category</th><th>Actual</th></tr></thead><tbody>'+rows+'</tbody></table></div>':'<div class="empty">No shared-account spending in '+monthLabel(m)+'. Mark a transaction as paid from the shared account to see it here.</div>');
+  }
+  const inc=eff(S.income,m)||0;
+  let totB=0,totA=0,miss=0;
+  const bOf=c=>eff(S.budgets[c.id],m)||0;
+  S.cats.forEach(c=>{const b=bOf(c),a=act[c.id]||0;totB+=b;totA+=a;miss+=Math.abs(b-a)});
+  if(act._none){totA+=act._none;miss+=act._none}
+  const accTxt=totB>0?Math.max(0,Math.round((1-miss/totB)*100))+'%':'–';
+  let h=seg+'<div class="met"><div><small>Income (tap to edit)</small><input inputmode="numeric" value="'+inc+'" onchange="A.setIncome(this.value)"></div><div><small>Spent</small><b>'+yen(totA)+'</b></div><div><small>Left to allocate</small><b class="'+(inc-totA<0?'wn':'')+'">'+yen(inc-totA)+'</b></div><div><small>Budget accuracy</small><b>'+accTxt+'</b></div></div>';
+  const line=(c,ind)=>{
+    const b=bOf(c),a=act[c.id]||0,left=b-a,pct=b>0?Math.min(100,a/b*100):(a>0?100:0);
+    let r='<tr><td class="'+(ind?'ind':'')+'">'+esc(c.name)+'</td><td><input inputmode="numeric" value="'+(b||'')+'" placeholder="0" onchange="A.setBudget(\''+c.id+'\',this.value)"></td><td onclick="A.openCat(\''+c.id+'\')" style="cursor:pointer;text-decoration:underline dotted">'+(a?yen(a):'–')+'</td><td class="'+(left<0?'wn':'')+'">'+((b||a)?yen(left):'')+'</td><td><div class="bar"><i style="width:'+pct+'%;background:var(--'+(a>b?'warn':'ok')+')"></i></div></td></tr>';
+    if(ui.open===c.id)r+='<tr><td colspan="5" style="padding:0">'+monthTx(m,sc).filter(t=>t.cat===c.id).sort((x,y)=>y.date.localeCompare(x.date)).map(t=>'<div class="sub" onclick="A.editTx(\''+t.id+'\')"><span>'+t.date.slice(5).replace('-','/')+' '+esc(t.merchant)+'</span><span>'+yen(t.amount)+'</span></div>').join('')+'</td></tr>';
+    return r;
+  };
+  let body='';
+  structure().forEach(s=>{
+    if(s.leaf){body+=line(s.leaf,false);return}
+    const gb=sum(s.cats.map(bOf)),ga=sum(s.cats.map(c=>act[c.id]||0)),col=ui.collapsed[s.name];
+    body+='<tr class="g" onclick="A.toggleGroup(\''+s.name+'\')"><td>'+(col?'▸ ':'▾ ')+esc(s.name)+'</td><td>'+(gb?yen(gb):'–')+'</td><td>'+(ga?yen(ga):'–')+'</td><td class="'+(gb-ga<0?'wn':'')+'">'+((gb||ga)?yen(gb-ga):'')+'</td><td></td></tr>';
+    if(!col)s.cats.forEach(c=>body+=line(c,true));
+  });
+  if(act._none)body+='<tr><td class="wn">Needs a category</td><td></td><td>'+yen(act._none)+'</td><td></td><td></td></tr>';
+  return h+'<div class="card" style="overflow-x:auto"><table><thead><tr><th>Category</th><th>Budget</th><th>Actual</th><th>Left</th><th>Progress</th></tr></thead><tbody>'+body+'</tbody></table></div><p class="mut">Budgets carry forward each month until you change them. Tap an actual to see its transactions.</p>';
+}
+
+function viewTrends(){
+  const first=S.tx.map(t=>t.date.slice(0,7)).sort()[0];
+  if(!first)return '<div class="empty">Trends appear once you have transactions.</div>';
+  let months=[];for(let i=5;i>=0;i--)months.push(addMonths(S.month,-i));
+  months=months.filter(x=>x>=first);if(!months.length)months=[S.month];
+  const data={};S.cats.forEach(c=>{data[c.id]=months.map(m=>sum(S.tx.filter(t=>t.cat===c.id&&t.from!=='shared'&&t.date.startsWith(m)).map(t=>t.amount)))});
+  const fmt=v=>v?(v>=100000?Math.round(v/1000):(Math.round(v/100)/10)):'–';
+  const cell=(v,avg)=>{let bg='';if(months.length>=3&&avg>0){if(v>avg*1.1)bg='background:var(--warnbg)';else if(v<avg*.9)bg='background:var(--okbg)'}return '<td style="'+bg+'">'+fmt(v)+'</td>'};
+  const trend=arr=>{if(months.length<3)return '–';const last=arr.slice(-2),prior=arr.slice(0,-2);const l=sum(last)/last.length,p=sum(prior)/prior.length;if(!p&&!l)return '–';if(l>p*1.1)return '<span class="wn">↗ Up</span>';if(l<p*.9)return '<span class="ok">↘ Down</span>';return '→ Flat'};
+  const rowOf=(name,arr,ind,g)=>{const avg=sum(arr)/arr.length;return '<tr'+(g?' class="g" style="cursor:default"':'')+'><td class="'+(ind?'ind':'')+'">'+esc(name)+'</td>'+arr.map(v=>cell(v,avg)).join('')+'<td>'+fmt(avg)+'</td><td>'+trend(arr)+'</td></tr>'};
+  let body='';
+  structure().forEach(s=>{
+    if(s.leaf){const a=data[s.leaf.id];if(sum(a))body+=rowOf(s.leaf.name,a,false,false);return}
+    const kids=s.cats.filter(c=>sum(data[c.id]));if(!kids.length)return;
+    body+=rowOf(s.name,months.map((_,i)=>sum(s.cats.map(c=>data[c.id][i]))),false,true);
+    kids.forEach(c=>body+=rowOf(c.name,data[c.id],true,false));
+  });
+  if(!body)return '<div class="empty">No spending in this window yet.</div>';
+  const none=months.map(m=>sum(S.tx.filter(t=>!t.cat&&t.from!=='shared'&&t.date.startsWith(m)).map(t=>t.amount)));
+  const tot=months.map((m,i)=>sum(S.cats.map(c=>data[c.id][i]))+none[i]);
+  return '<p class="mut">Your spending in thousands of yen. Shading marks months more than 10% above or below that row’s average.</p><div class="card" style="overflow-x:auto"><table><thead><tr><th>Category</th>'+months.map(m=>'<th>'+MN[+m.slice(5)-1]+'</th>').join('')+'<th>Avg</th><th>Trend</th></tr></thead><tbody>'+body+rowOf('Total',tot,false,true)+'</tbody></table></div>';
+}
+
+function viewReceipts(){
+  const rs=[...S.receipts].sort((a,b)=>b.date.localeCompare(a.date));
+  let h='<div class="row" style="margin:0 0 12px"><button class="pri grow" onclick="$(\'#cam\').click()">Take photo</button><button class="grow" onclick="$(\'#lib\').click()">From library</button><button onclick="A.matchAll()">Auto-match</button></div>';
+  if(!rs.length)return h+'<div class="empty">No receipts yet.<br>Take a photo and it is saved here. When you import a statement, receipts are matched to their transactions.</div>';
+  const un=rs.filter(r=>!r.txId).length;
+  h+='<p class="mut">'+rs.length+' receipts · '+un+' not matched yet</p><div class="grid">';
+  rs.forEach(r=>{h+='<div class="rc" onclick="A.viewReceipt(\''+r.id+'\')"><img data-pid="'+r.id+'" alt="Receipt"><div>'+r.date.slice(5).replace('-','/')+(r.amount?' · '+yen(r.amount):'')+'<br>'+(r.txId?'<span class="chip o">Matched</span>':'<span class="chip w">Not matched</span>')+'</div></div>'});
+  return h+'</div>';
+}
+A.addPhotos=async inp=>{
+  const files=[...inp.files];inp.value='';if(!files.length)return;let n=0;
+  for(const f of files){try{
+    const blob=await compress(f),id=uid();await pPut(id,blob);
+    const d=f.lastModified?isoOf(new Date(f.lastModified)):today();
+    S.receipts.push({id:id,date:d,amount:0,txId:''});n++;
+  }catch(e){toast('Could not save a photo. Storage may be full.')}}
+  save();if(n)toast(n+' receipt'+(n>1?'s':'')+' saved');ui.tab='receipts';render();
+};
+A.matchAll=()=>{const n=autoMatch();toast(n?n+' matched by amount':'Nothing to match. Add amounts to receipts, or open one to pick a transaction.');render()};
+A.viewReceipt=id=>{
+  const r=S.receipts.find(x=>x.id===id);if(!r)return;
+  let h='<h3>Receipt</h3><img class="full" data-pid="'+id+'" alt="Receipt">'+
+  '<div class="row"><div class="grow"><label>Date</label><input type="date" id="r_date" value="'+r.date+'"></div><div class="grow"><label>Amount (optional)</label><input id="r_amt" inputmode="numeric" value="'+(r.amount||'')+'"></div></div>';
+  if(r.txId){const t=S.tx.find(x=>x.id===r.txId);h+='<p class="mut">Matched to '+(t?esc(t.merchant)+' · '+yen(t.amount)+' · '+t.date.slice(5).replace('-','/'):'a transaction')+'</p><button onclick="A.unlink(\''+id+'\')">Unlink</button>'}
+  else{
+    const c=candidates(r).slice(0,5);
+    h+='<label>Match to a transaction</label>'+(c.length?'<div class="card">'+c.map(t=>'<div class="tx" onclick="A.link(\''+id+'\',\''+t.id+'\')"><div class="grow"><div class="m">'+esc(t.merchant)+'</div><div class="mut">'+t.date.slice(5).replace('-','/')+'</div></div><div>'+yen(t.amount)+'</div></div>').join('')+'</div>':'<p class="mut">No transactions within 3 days yet. Import your statement first, or add this as a cash purchase below.</p>')+
+    '<label>Cash purchase? Add it as a transaction</label><input id="r_mer" placeholder="Merchant"><select id="r_cat" style="margin-top:6px">'+catOpts('',true)+'</select><button style="margin-top:6px" onclick="A.receiptToTx(\''+id+'\')">Add transaction</button>';
+  }
+  h+='<div class="row" style="margin-top:14px"><button class="pri grow" onclick="A.saveReceipt(\''+id+'\')">Save</button><button class="dng" onclick="A.delReceipt(\''+id+'\')">Delete</button><button onclick="closeModal()">Close</button></div>';
+  modal(h);
+};
+A.saveReceipt=id=>{const r=S.receipts.find(x=>x.id===id);r.date=$('#r_date').value||r.date;r.amount=parseAmt($('#r_amt').value)||0;const n=autoMatch();save();closeModal();render();if(n)toast('Matched by amount')};
+A.link=(id,tid)=>{const r=S.receipts.find(x=>x.id===id);r.date=$('#r_date').value||r.date;r.txId=tid;save();closeModal();render()};
+A.unlink=id=>{S.receipts.find(x=>x.id===id).txId='';save();A.viewReceipt(id);render()};
+A.delReceipt=id=>{if(!arm('r'+id,'Tap Delete again to confirm.'))return;S.receipts=S.receipts.filter(r=>r.id!==id);pDel(id);delete urlCache[id];save();closeModal();render()};
+A.receiptToTx=id=>{
+  const r=S.receipts.find(x=>x.id===id),amt=parseAmt($('#r_amt').value),mer=$('#r_mer').value.trim(),cat=$('#r_cat').value||autoCat(mer);
+  if(!amt||!mer){toast('Enter an amount and a merchant.');return}
+  const date=$('#r_date').value||r.date,tid=uid();
+  S.tx.push({id:tid,date:date,merchant:mer,amount:amt,cat:cat,from:'mine'});r.txId=tid;r.amount=amt;r.date=date;
+  save();closeModal();render();toast('Transaction added');
+};
+
+function viewSettings(){
+  let h='<h3 style="font-weight:500;margin:4px 0 6px">Category rules</h3><p class="mut">If a merchant name contains the text on the left, it gets the category on the right. Longer matches win.</p><div class="card">';
+  h+=S.rules.map((r,i)=>'<div class="tx" style="cursor:default"><div class="grow m">'+esc(r.p)+'</div><select style="width:46%" onchange="A.ruleCat('+i+',this.value)">'+catOpts(r.c)+'</select><button class="dng" aria-label="Delete rule" onclick="A.delRule('+i+')">×</button></div>').join('');
+  h+='</div><div class="row"><input class="grow" id="nr_p" placeholder="Merchant text"><select id="nr_c" class="grow">'+catOpts('',true)+'</select><button onclick="A.addRule()">Add rule</button></div>';
+  h+='<h3 style="font-weight:500;margin:22px 0 6px">Add a category</h3><div class="row"><input class="grow" id="nc_n" placeholder="Name"><select id="nc_g" class="grow"><option value="">No group</option>'+[...new Set(S.cats.map(c=>c.g).filter(Boolean))].map(g=>'<option>'+esc(g)+'</option>').join('')+'</select><button onclick="A.addCat()">Add</button></div>';
+  h+='<h3 style="font-weight:500;margin:22px 0 6px">Backup file</h3><p class="mut">Your data lives on this device. Save a backup file to your Files app, Google Drive or iCloud Drive to keep a copy off the phone.'+(S.lastBackup?' Last saved: '+new Date(S.lastBackup).toLocaleDateString():' None saved yet.')+'</p><div class="row"><button class="pri" onclick="A.backup(true)">Save with photos</button><button onclick="A.backup(false)">Save without photos</button><button onclick="$(\'#restore\').click()">Restore from file</button></div>';
+  h+='<h3 style="font-weight:500;margin:22px 0 6px">Version history</h3><p class="mut">A copy of your numbers is kept automatically: one per day for 30 days, then one per month for a year. Photos are not included. A restore keeps a copy of what you had just before it.</p><div id="snaplist"></div>';
+  h+='<h3 style="font-weight:500;margin:22px 0 6px">Reset</h3><button class="dng" onclick="A.reset()">Erase all data</button>';
+  setTimeout(()=>A.snaps(),0);
+  return h;
+}
+A.ruleCat=(i,v)=>{S.rules[i].c=v;save()};
+A.delRule=i=>{S.rules.splice(i,1);save();render()};
+A.addRule=()=>{const p=$('#nr_p').value.trim(),c=$('#nr_c').value;if(!p||!c){toast('Enter merchant text and pick a category.');return}S.rules.push({p:p,c:c});save();render()};
+A.addCat=()=>{const n=$('#nc_n').value.trim(),g=$('#nc_g').value;if(!n)return;S.cats.push({id:'c_'+uid(),name:n,g:g});save();render()};
+const toDataURL=b=>new Promise(r=>{const f=new FileReader();f.onload=()=>r(f.result);f.readAsDataURL(b)});
+const dl=async(name,blob)=>{
+  let d=null;try{d=(window.claude&&claude.use)?await claude.use('downloads'):null}catch(e){}
+  if(d){
+    try{await d.save({filename:name,data:blob});return true}
+    catch(e){if(!e||e.code!=='declined')toast('This page could not save the file ('+((e&&e.code)||'error')+').');return false}
+  }
+  try{
+    const f=new File([blob],name,{type:'application/json'});
+    if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f]});return true}
+  }catch(e){if(e&&e.name==='AbortError')return false}
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();a.remove();return true;
+};
+A.backup=async withPhotos=>{
+  const photos={};
+  if(withPhotos!==false)for(const r of S.receipts){try{const b=await pGet(r.id);if(b)photos[r.id]=await toDataURL(b)}catch(e){}}
+  const blob=new Blob([JSON.stringify({version:1,state:S,photos:photos})],{type:'application/json'});
+  const ok=await dl('budget-ledger-'+today()+(withPhotos===false?'-numbers':'')+'.json',blob);
+  if(ok){S.lastBackup=Date.now();save();toast('Backup saved');render()}
+};
+A.restore=async inp=>{
+  const f=inp.files[0];inp.value='';if(!f)return;
+  try{
+    const j=JSON.parse(await f.text());if(!j.state||!j.state.tx)throw 0;
+    await snapNow('Before restore');
+    S=j.state;for(const id in (j.photos||{})){const b=await (await fetch(j.photos[id])).blob();await pPut(id,b)}
+    save();render();toast('Backup restored');
+  }catch(e){toast('That file is not a valid backup.')}
+};
+A.snaps=async()=>{
+  const box=$('#snaplist');if(!box)return;
+  try{
+    const all=(await sreq('readonly',st=>st.getAll())).sort((a,b)=>b.t-a.t);
+    if(!all.length){box.innerHTML='<p class="mut">No versions yet. The first one is saved shortly after your next change.</p>';return}
+    box.innerHTML='<div class="card">'+all.map(x=>'<div class="tx" style="cursor:default"><div class="grow"><div class="m">'+(x.label?esc(x.label):'Daily copy')+'</div><div class="mut">'+new Date(x.t).toLocaleString()+' · '+x.n+' transactions</div></div><button onclick="A.restoreSnap(\''+x.k+'\')">Restore</button></div>').join('')+'</div>';
+  }catch(e){box.innerHTML='<p class="mut">Version history is not available in this browser.</p>'}
+};
+A.restoreSnap=async k=>{
+  try{
+    const x=await sreq('readonly',st=>st.get(k));if(!x)return;
+    if(!arm('s'+k,'Tap Restore again to confirm. Your current data is saved first.'))return;
+    await snapNow('Before restore');
+    const lb=S.lastBackup;S=JSON.parse(x.state);S.lastBackup=lb;
+    save();render();toast('Version restored');
+  }catch(e){toast('Could not restore that version.')}
+};
+A.reset=async()=>{
+  if(!arm('reset','Tap Erase again to confirm. Your numbers stay in version history.'))return;
+  await snapNow('Before erase');
+  localStorage.removeItem(LS);S.receipts.forEach(r=>pDel(r.id));location.reload();
+};
+
+if(typeof document!=='undefined'&&document.getElementById('app')){
+  try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist()}catch(e){}
+  render();
+}
+</script>
+
+
+<script>
+if('serviceWorker' in navigator&&location.protocol.indexOf('http')===0){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{})})}
+</script>
+</body>
+</html>
