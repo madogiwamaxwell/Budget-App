@@ -448,7 +448,7 @@ function viewSettings(){
   h+=S.rules.map((r,i)=>'<div class="tx" style="cursor:default"><div class="grow m">'+esc(r.p)+'</div><select style="width:46%" onchange="A.ruleCat('+i+',this.value)">'+catOpts(r.c)+'</select><button class="dng" aria-label="Delete rule" onclick="A.delRule('+i+')">×</button></div>').join('');
   h+='</div><div class="row"><input class="grow" id="nr_p" placeholder="Merchant text"><select id="nr_c" class="grow">'+catOpts('',true)+'</select><button onclick="A.addRule()">Add rule</button></div>';
   h+='<h3 style="font-weight:500;margin:22px 0 6px">Add a category</h3><div class="row"><input class="grow" id="nc_n" placeholder="Name"><select id="nc_g" class="grow"><option value="">No group</option>'+[...new Set(S.cats.map(c=>c.g).filter(Boolean))].map(g=>'<option>'+esc(g)+'</option>').join('')+'</select><button onclick="A.addCat()">Add</button></div>';
-  h+='<h3 style="font-weight:500;margin:22px 0 6px">Backup file</h3><p class="mut">Your data lives on this device. Save a backup file to your Files app, Google Drive or iCloud Drive to keep a copy off the phone.'+(S.lastBackup?' Last saved: '+new Date(S.lastBackup).toLocaleDateString():' None saved yet.')+'</p><div class="row"><button class="pri" onclick="A.backup(true)">Save with photos</button><button onclick="A.backup(false)">Save without photos</button><button onclick="$(\'#restore\').click()">Restore from file</button></div>';
+  h+='<h3 style="font-weight:500;margin:22px 0 6px">Backup file</h3><p class="mut">Your data lives on this device. Save a backup file to your Files app, Google Drive or iCloud Drive to keep a copy off the phone.'+(S.lastBackup?' Last saved: '+new Date(S.lastBackup).toLocaleDateString():' None saved yet.')+'</p><div class="row"><button class="pri" onclick="A.backup(true)">Save with photos</button><button onclick="A.backup(false)">Save without photos</button><button onclick="$(\'#restore\').click()">Restore from file</button><button onclick="A.pasteRestore()">Restore from pasted text</button></div><p class="mut" style="margin-top:12px">A spreadsheet copy of your transactions that opens in Excel or Google Sheets. It cannot be restored into the app, so keep a backup file as well.</p><div class="row"><button onclick="A.csv()">Download as spreadsheet</button></div>';
   h+='<h3 style="font-weight:500;margin:22px 0 6px">Version history</h3><p class="mut">A copy of your numbers is kept automatically: one per day for 30 days, then one per month for a year. Photos are not included. A restore keeps a copy of what you had just before it.</p><div id="snaplist"></div>';
   h+='<h3 style="font-weight:500;margin:22px 0 6px">Reset</h3><button class="dng" onclick="A.reset()">Erase all data</button>';
   setTimeout(()=>A.snaps(),0);
@@ -459,34 +459,62 @@ A.delRule=i=>{S.rules.splice(i,1);save();render()};
 A.addRule=()=>{const p=$('#nr_p').value.trim(),c=$('#nr_c').value;if(!p||!c){toast('Enter merchant text and pick a category.');return}S.rules.push({p:p,c:c});save();render()};
 A.addCat=()=>{const n=$('#nc_n').value.trim(),g=$('#nc_g').value;if(!n)return;S.cats.push({id:'c_'+uid(),name:n,g:g});save();render()};
 const toDataURL=b=>new Promise(r=>{const f=new FileReader();f.onload=()=>r(f.result);f.readAsDataURL(b)});
-const dl=async(name,blob)=>{
+const taStyle='width:100%;height:150px;font:12px/1.3 monospace;background:var(--card);color:var(--tx);border:1px solid var(--bd);border-radius:8px;padding:8px';
+const dl=async(name,blob,done)=>{
   let d=null;try{d=(window.claude&&claude.use)?await claude.use('downloads'):null}catch(e){}
   if(d){
-    try{await d.save({filename:name,data:blob});return true}
-    catch(e){if(!e||e.code!=='declined')toast('This page could not save the file ('+((e&&e.code)||'error')+').');return false}
+    let ok=false;
+    try{await d.save({filename:name,data:blob});ok=true}
+    catch(e){if(!e||e.code!=='declined')toast('This page could not save the file ('+((e&&e.code)||'error')+').')}
+    done(ok);return;
   }
-  try{
-    const f=new File([blob],name,{type:'application/json'});
-    if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f]});return true}
-  }catch(e){if(e&&e.name==='AbortError')return false}
-  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();a.remove();return true;
+  const f=new File([blob],name,{type:blob.type||'application/octet-stream'});
+  let can=false;try{can=!!(navigator.canShare&&navigator.canShare({files:[f]}))}catch(e){}
+  dl.cur={f:f,blob:blob,name:name,done:done};
+  modal('<h3 style="margin:0 0 4px;font-weight:500">File ready</h3><p class="mut">'+esc(name)+' · '+Math.max(1,Math.round(blob.size/1024)).toLocaleString()+' KB</p><div class="row">'+(can?'<button class="pri" onclick="A.shareFile()">Save or share…</button><button onclick="A.downloadFile()">Download</button>':'<button class="pri" onclick="A.downloadFile()">Download</button>')+'<button onclick="closeModal()">Cancel</button></div>'+(/\.json$/.test(name)?'<p class="mut" style="margin-top:14px">If the file will not save, copy your numbers as text and paste them into a note. Receipt photos are not included in the text.</p><div class="row"><button onclick="A.copyBackup()">Copy backup as text</button></div>':''));
+};
+A.shareFile=async()=>{
+  const c=dl.cur;if(!c)return;
+  try{await navigator.share({files:[c.f]});closeModal();c.done(true)}
+  catch(e){if(e&&e.name==='AbortError')return;toast('Sharing failed ('+((e&&e.name)||'error')+'). Try Download or Copy as text.')}
+};
+A.downloadFile=()=>{
+  const c=dl.cur;if(!c)return;
+  const a=document.createElement('a');a.href=URL.createObjectURL(c.blob);a.download=c.name;document.body.appendChild(a);a.click();a.remove();
+  closeModal();c.done(true);
+};
+A.copyBackup=async()=>{
+  const text=JSON.stringify({version:1,state:S,photos:{}});
+  try{await navigator.clipboard.writeText(text);closeModal();S.lastBackup=Date.now();save();toast('Copied. Paste it into a note or email to yourself.');render()}
+  catch(e){modal('<h3 style="margin:0 0 4px;font-weight:500">Backup text</h3><p class="mut">Copying did not work. Press and hold in the box, choose Select All, then Copy.</p><textarea id="bt" readonly style="'+taStyle+'">'+esc(text)+'</textarea><div class="row" style="margin-top:10px"><button onclick="closeModal()">Close</button></div>');setTimeout(()=>{const t=$('#bt');if(t){t.focus();t.select()}},50)}
+};
+A.csv=async()=>{
+  const q=v=>{v=String(v==null?'':v);return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
+  const rc=new Set(S.receipts.filter(r=>r.txId).map(r=>r.txId));
+  const rows=[['Date','Merchant','Amount (JPY)','Category','Group','Paid from','Receipt photo']];
+  S.tx.slice().sort((a,b)=>a.date.localeCompare(b.date)).forEach(t=>{
+    const c=t.cat?catById(t.cat):null;
+    rows.push([t.date,t.merchant,t.amount,t.cat?catName(t.cat):'(needs a category)',(c&&c.g)||'',t.from==='shared'?'Shared account':'My card or cash',rc.has(t.id)?'Yes':'']);
+  });
+  const text='\ufeff'+rows.map(r=>r.map(q).join(',')).join('\r\n');
+  dl('budget-ledger-transactions-'+today()+'.csv',new Blob([text],{type:'text/csv'}),ok=>{if(ok)toast('Spreadsheet saved ('+S.tx.length+' transactions)')});
 };
 A.backup=async withPhotos=>{
   const photos={};
   if(withPhotos!==false)for(const r of S.receipts){try{const b=await pGet(r.id);if(b)photos[r.id]=await toDataURL(b)}catch(e){}}
   const blob=new Blob([JSON.stringify({version:1,state:S,photos:photos})],{type:'application/json'});
-  const ok=await dl('budget-ledger-'+today()+(withPhotos===false?'-numbers':'')+'.json',blob);
-  if(ok){S.lastBackup=Date.now();save();toast('Backup saved');render()}
+  dl('budget-ledger-'+today()+(withPhotos===false?'-numbers':'')+'.json',blob,ok=>{if(ok){S.lastBackup=Date.now();save();toast('Backup saved');render()}});
 };
-A.restore=async inp=>{
-  const f=inp.files[0];inp.value='';if(!f)return;
+A.applyBackup=async txt=>{
   try{
-    const j=JSON.parse(await f.text());if(!j.state||!j.state.tx)throw 0;
+    const j=JSON.parse(txt);if(!j.state||!j.state.tx)throw 0;
     await snapNow('Before restore');
     S=j.state;for(const id in (j.photos||{})){const b=await (await fetch(j.photos[id])).blob();await pPut(id,b)}
-    save();render();toast('Backup restored');
-  }catch(e){toast('That file is not a valid backup.')}
+    save();closeModal();render();toast('Backup restored');
+  }catch(e){toast('That is not a valid backup.')}
 };
+A.restore=async inp=>{const f=inp.files[0];inp.value='';if(!f)return;A.applyBackup(await f.text())};
+A.pasteRestore=()=>modal('<h3 style="margin:0 0 4px;font-weight:500">Restore from text</h3><p class="mut">Paste the backup text you copied earlier. This replaces your current data, and a copy of the current data is kept in Version history.</p><textarea id="pr_t" placeholder="Paste here" style="'+taStyle+'"></textarea><div class="row" style="margin-top:10px"><button class="pri" onclick="A.applyBackup($(\'#pr_t\').value)">Restore</button><button onclick="closeModal()">Cancel</button></div>');
 A.snaps=async()=>{
   const box=$('#snaplist');if(!box)return;
   try{
