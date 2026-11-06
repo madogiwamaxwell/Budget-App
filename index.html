@@ -89,7 +89,7 @@ nav button.on{color:var(--acc);font-weight:500}
 <input type="file" id="restore" accept=".json,application/json" hidden onchange="A.restore(this)">
 <script>
 const LS='budgetLedger.v1';
-const APP_VERSION='6';
+const APP_VERSION='7';
 const MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -235,7 +235,60 @@ function fix(s){
   if(!s.recur)s.recur=[];
   if(!s.recurDone)s.recurDone={};
   if(!s.rate)s.rate=0;
+  if(!s.rates)s.rates={};
   return s;
+}
+const rateTried={};
+const persist=()=>{try{localStorage.setItem(LS,JSON.stringify(S))}catch(e){}};
+async function fetchRates(from,to){
+  if(typeof fetch==='undefined')return false;
+  const lim=today();if(from>lim)from=lim;if(to&&to>lim)to=lim;
+  const hosts=['https://api.frankfurter.dev/v1/','https://api.frankfurter.app/'];
+  for(const h of hosts){
+    try{
+      const range=!!(to&&to!==from);
+      const start=range?isoOf(new Date(new Date(from+'T12:00:00').getTime()-4*864e5)):from;
+      const r=await fetch(h+start+(range?'..'+to:'')+'?base=USD&symbols=JPY');
+      if(!r.ok)continue;
+      const j=await r.json();if(!j||!j.rates)continue;
+      if(typeof j.rates.JPY==='number'){S.rates[from]=j.rates.JPY;if(j.date)S.rates[j.date]=j.rates.JPY}
+      else{
+        let last=null;const end=new Date((to||from)+'T12:00:00').getTime();
+        for(let t=new Date(start+'T12:00:00').getTime();t<=end;t+=864e5){
+          const d=isoOf(new Date(t)),v=j.rates[d];
+          if(v&&typeof v.JPY==='number')last=v.JPY;
+          if(last!==null)S.rates[d]=last;
+        }
+      }
+      persist();return true;
+    }catch(e){}
+  }
+  return false;
+}
+function dayRate(d){const k=d>today()?today():d;return S.rates[k]||0}
+function usdSpent(m){
+  let usd=0,miss=0;
+  monthTx(m,'my').forEach(t=>{if(t.cur==='USD'){usd+=t.orig;return}const r=dayRate(t.date);if(r)usd+=t.amount/r;else miss++});
+  return{usd:usd,miss:miss};
+}
+const usdFmt=n=>(n<0?'-':'')+'$'+Math.abs(Math.round(n)).toLocaleString('en-US');
+function usdLine(m){
+  const u=usdSpent(m);if(!u.usd&&!u.miss)return '';
+  return '<p class="mut" style="margin:0 0 10px">About '+usdFmt(u.usd)+' spent this month, converted at each day\'s rate.'+(u.miss?' '+u.miss+' transaction'+(u.miss>1?'s are':' is')+' waiting for a rate.':'')+'</p>';
+}
+async function ensureAllRates(){
+  const by={};S.tx.forEach(t=>{if(t.cur!=='USD'&&!dayRate(t.date)){(by[t.date.slice(0,7)]=by[t.date.slice(0,7)]||[]).push(t.date)}});
+  const ms=Object.keys(by).sort();if(!ms.length)return;
+  toast('Looking up exchange rates…');
+  for(const m of ms){const ds=by[m].sort();await fetchRates(ds[0],ds[ds.length-1])}
+}
+async function ensureRates(m){
+  if(rateTried[m])return;
+  const dates=[...new Set(monthTx(m,'my').map(t=>t.date))].filter(d=>!dayRate(d)).sort();
+  if(!dates.length)return;
+  rateTried[m]=1;
+  const ok=await fetchRates(dates[0],dates[dates.length-1]);
+  if(ok&&(ui.tab==='month'||ui.tab==='ledger'))render();
 }
 const num=t=>{const n=parseFloat(String(t==null?'':t).replace(/[^\d.]/g,''));return isNaN(n)?0:n};
 const dim=m=>{const p=m.split('-').map(Number);return new Date(p[0],p[1],0).getDate()};
@@ -297,6 +350,8 @@ function render(){
   const fab=(ui.tab==='ledger')?'<button class="fab" aria-label="Add transaction" onclick="A.editTx()">+</button>':(ui.tab==='savings')?'<button class="fab" aria-label="Add savings entry" onclick="A.savEntry(\'\')">+</button>':'';
   $('#app').innerHTML=header()+'<main>'+v+'</main>'+fab+nav();
   hydrate();
+  if(ui.tab==='ledger')A.dueRates();
+  if(ui.tab==='month'||ui.tab==='ledger')ensureRates(S.month);
 }
 
 function recFor(id){return S.receipts.filter(r=>r.txId===id)}
@@ -313,7 +368,7 @@ function viewLedger(){
   h+='<div class="row" style="margin:0 0 12px"><input class="grow" placeholder="Search merchant or category" value="'+esc(ui.q)+'" onchange="A.q(this.value)"><button onclick="A.openImport()">Import</button></div>';
   if(!list.length)return h+'<div class="empty">No transactions in '+monthLabel(m)+'.<br>Tap + to add one, or Import to paste a statement.</div>';
   const tot=sum(list.filter(t=>t.from!=='shared').map(t=>t.amount));
-  h+='<p class="mut" style="margin:0 0 8px">'+list.length+' transactions · '+yen(tot)+' from your own spending</p><div class="card">';
+  h+='<p class="mut" style="margin:0 0 8px">'+list.length+' transactions · '+yen(tot)+' from your own spending'+(usdSpent(m).usd?' · about '+usdFmt(usdSpent(m).usd):'')+'</p><div class="card">';
   list.forEach(t=>{
     const rc=recFor(t.id).length;
     h+='<div class="tx" onclick="A.editTx(\''+t.id+'\')"><div class="grow"><div class="m">'+esc(t.merchant)+'</div><div class="mut">'+t.date.slice(5).replace('-','/')+' · <span class="chip'+(t.cat?'':' w')+'">'+esc(catName(t.cat))+'</span>'+(t.from==='shared'?'<span class="chip o">Shared</span>':'')+(t.grp?'<span class="chip">Split</span>':'')+(t.cur==='USD'?'<span class="chip">$'+t.orig+'</span>':'')+(rc?'<span class="chip">Receipt</span>':'')+'</div></div><div style="white-space:nowrap">'+yen(t.amount)+'</div></div>';
@@ -326,11 +381,11 @@ A.editTx=id=>{
   const rc=id?recFor(id):[],usd=t.cur==='USD';
   const recent=[...new Set(S.tx.slice().sort((x,y)=>y.date.localeCompare(x.date)).map(x=>x.merchant))].slice(0,80);
   modal('<h3>'+(id?'Edit transaction':'Add transaction')+'</h3>'+
-  '<label>Date</label><input type="date" id="f_date" value="'+t.date+'">'+
+  '<label>Date</label><input type="date" id="f_date" value="'+t.date+'" onchange="A.rateLookup()">'+
   '<label>Merchant</label><input id="f_mer" list="merlist" autocomplete="off" value="'+esc(t.merchant)+'" oninput="A.suggest()"><datalist id="merlist">'+recent.map(x=>'<option value="'+esc(x)+'">').join('')+'</datalist>'+
   '<label>Currency</label><select id="f_cur" onchange="A.curChg()"><option value="JPY">Yen (¥)</option><option value="USD"'+(usd?' selected':'')+'>US dollars ($)</option></select>'+
   '<label id="f_al">'+(usd?'Amount (US dollars)':'Amount (yen)')+' · use a minus sign for a refund</label><input id="f_amt" inputmode="decimal" value="'+(usd?t.orig:(t.amount||''))+'" oninput="A.conv()">'+
-  '<div id="f_rb"'+(usd?'':' hidden')+'><label>Exchange rate (yen per $1)</label><input id="f_rate" inputmode="decimal" value="'+(usd?t.rate:'')+'" oninput="A.conv()"><p class="mut" id="f_cv"></p></div>'+
+  '<div id="f_rb"'+(usd?'':' hidden')+'><label>Exchange rate (yen per $1)</label><input id="f_rate" inputmode="decimal" value="'+(usd?t.rate:'')+'" oninput="this.dataset.t=1;A.conv()"><p class="mut" id="f_rs"></p><p class="mut" id="f_cv"></p></div>'+
   '<label>Category</label><select id="f_cat">'+catOpts(t.cat,true)+'</select>'+
   '<label>Paid from</label><select id="f_from"><option value="mine"'+(t.from!=='shared'?' selected':'')+'>My card or cash</option><option value="shared"'+(t.from==='shared'?' selected':'')+'>Shared account</option></select>'+
   '<label><input type="checkbox" id="f_rem" checked style="width:auto"> Remember this merchant for next time</label>'+
@@ -339,7 +394,17 @@ A.editTx=id=>{
   '<div class="row" style="margin-top:14px"><button class="pri grow" onclick="A.saveTx(\''+(id||'')+'\')">Save</button>'+(id?'<button onclick="A.split(\''+id+'\')">'+(t.grp?'Edit split':'Split')+'</button><button class="dng" onclick="A.delTx(\''+id+'\')">Delete</button>':'')+'<button onclick="closeModal()">Cancel</button></div>');
   A.conv();
 };
-A.curChg=()=>{const u=$('#f_cur').value==='USD';$('#f_rb').hidden=!u;$('#f_al').textContent=(u?'Amount (US dollars)':'Amount (yen)')+' · use a minus sign for a refund';if(u&&!$('#f_rate').value&&S.rate)$('#f_rate').value=S.rate;A.conv()};
+A.curChg=()=>{const u=$('#f_cur').value==='USD';$('#f_rb').hidden=!u;$('#f_al').textContent=(u?'Amount (US dollars)':'Amount (yen)')+' · use a minus sign for a refund';if(u&&!$('#f_rate').value&&S.rate)$('#f_rate').value=S.rate;A.conv();if(u)A.rateLookup()};
+A.rateLookup=async()=>{
+  const cs=$('#f_cur');if(!cs||cs.value!=='USD')return;
+  const d=$('#f_date').value;if(!d)return;
+  const box=$('#f_rs');let r=dayRate(d);
+  if(!r){if(box)box.textContent='Looking up the rate for '+d+'…';await fetchRates(d);r=dayRate(d)}
+  const inp=$('#f_rate'),box2=$('#f_rs');if(!inp||!box2)return;
+  if(r){if(!inp.dataset.t)inp.value=r;box2.textContent='Rate for '+d.slice(5).replace('-','/')+': ¥'+r.toFixed(2)+' per $1 (European Central Bank). You can change it.'}
+  else box2.textContent='Could not look up the rate. Check your connection, or type a rate yourself.';
+  A.conv();
+};
 A.conv=()=>{const e=$('#f_cv');if(!e||$('#f_cur').value!=='USD')return;const a=Math.abs(num($('#f_amt').value)),r=num($('#f_rate').value);e.textContent=(a&&r)?'Counts as '+yen(Math.round(a*r))+' in your budget.':'Enter the exchange rate to see the yen amount.'};
 A.suggest=()=>{
   const v=$('#f_mer').value,n=norm(v);if(!n)return;
@@ -347,7 +412,7 @@ A.suggest=()=>{
   const sel=$('#f_cat');if(!sel.value){const c=autoCat(v)||(last&&last.cat);if(c)sel.value=c}
   if(last&&!$('#f_amt').value){
     $('#f_from').value=last.from==='shared'?'shared':'mine';
-    if(last.cur==='USD'){$('#f_cur').value='USD';A.curChg();$('#f_amt').value=last.orig;$('#f_rate').value=last.rate;A.conv()}
+    if(last.cur==='USD'){$('#f_cur').value='USD';A.curChg();$('#f_amt').value=last.orig;$('#f_rate').value=last.rate;A.conv();A.rateLookup()}
     else $('#f_amt').value=last.amount;
   }
 };
@@ -418,7 +483,7 @@ function viewMonth(){
   const st=monthStats(m),inc=st.inc,totA=st.totA;
   const bOf=c=>eff(S.budgets[c.id],m)||0;
   const accTxt=st.acc===null?'–':st.acc+'%';
-  let h=seg+'<div class="met"><div><small>Income (tap to edit)</small><input inputmode="numeric" value="'+fmtN(inc)+'" placeholder="0" onchange="A.setIncome(this.value)"></div><div><small>Spent</small><b>'+yen(totA)+'</b></div><div><small>Left to allocate</small><b class="'+(st.left<0?'wn':'')+'">'+yen(st.left)+'</b></div><div><small>Budget accuracy</small><b>'+accTxt+'</b></div><div><small>Saved this month</small><b>'+yen(st.dep-st.wd)+'</b></div><div><small>All savings</small><b>'+yen(sum(S.buckets.map(b=>bBal(b.id))))+'</b></div></div>'+incHint(m,inc)+'<div class="row" style="margin:0 0 12px"><button class="grow" onclick="A.summary()">Month summary</button><button class="grow" onclick="A.allocate()">Allocate savings</button></div>';
+  let h=seg+'<div class="met"><div><small>Income (tap to edit)</small><input inputmode="numeric" value="'+fmtN(inc)+'" placeholder="0" onchange="A.setIncome(this.value)"></div><div><small>Spent</small><b>'+yen(totA)+'</b></div><div><small>Left to allocate</small><b class="'+(st.left<0?'wn':'')+'">'+yen(st.left)+'</b></div><div><small>Budget accuracy</small><b>'+accTxt+'</b></div><div><small>Saved this month</small><b>'+yen(st.dep-st.wd)+'</b></div><div><small>All savings</small><b>'+yen(sum(S.buckets.map(b=>bBal(b.id))))+'</b></div></div>'+usdLine(m)+incHint(m,inc)+'<div class="row" style="margin:0 0 12px"><button class="grow" onclick="A.summary()">Month summary</button><button class="grow" onclick="A.allocate()">Allocate savings</button></div>';
   const line=(c,ind)=>{
     const b=bOf(c),a=act[c.id]||0,left=b-a,pct=b>0?Math.max(0,Math.min(100,a/b*100)):(a>0?100:0);
     let r='<tr><td class="'+(ind?'ind':'')+'" onclick="A.editCat(\''+c.id+'\')" style="cursor:pointer">'+esc(c.name)+'</td><td><input inputmode="numeric" value="'+fmtN(b)+'" placeholder="0" onchange="A.setBudget(\''+c.id+'\',this.value)"></td><td onclick="A.openCat(\''+c.id+'\')" style="cursor:pointer;text-decoration:underline dotted">'+(a?yen(a):'–')+'</td><td class="'+(left<0?'wn':'')+'">'+((b||a)?yen(left):'')+'</td><td><div class="bar"><i style="width:'+pct+'%;background:var(--'+(a>b?'warn':'ok')+')"></i></div></td></tr>';
@@ -621,12 +686,13 @@ A.copyBackup=async()=>{
   catch(e){modal('<h3 style="margin:0 0 4px;font-weight:500">Backup text</h3><p class="mut">Copying did not work. Press and hold in the box, choose Select All, then Copy.</p><textarea id="bt" readonly style="'+taStyle+'">'+esc(text)+'</textarea><div class="row" style="margin-top:10px"><button onclick="closeModal()">Close</button></div>');setTimeout(()=>{const t=$('#bt');if(t){t.focus();t.select()}},50)}
 };
 A.csv=async()=>{
+  await ensureAllRates();
   const q=v=>{v=String(v==null?'':v);return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
   const rc=new Set(S.receipts.filter(r=>r.txId).map(r=>r.txId));
-  const rows=[['Date','Merchant','Amount (JPY)','Category','Group','Paid from','Receipt photo','Original currency','Original amount','Exchange rate','Split']];
+  const rows=[['Date','Merchant','Amount (JPY)','Category','Group','Paid from','Receipt photo','Original currency','Original amount','Exchange rate','Split','Approx. USD']];
   S.tx.slice().sort((a,b)=>a.date.localeCompare(b.date)).forEach(t=>{
     const c=t.cat?catById(t.cat):null;
-    rows.push([t.date,t.merchant,t.amount,t.cat?catName(t.cat):'(needs a category)',(c&&c.g)||'',t.from==='shared'?'Shared account':'My card or cash',rc.has(t.id)?'Yes':'',t.cur==='USD'?'USD':'',t.cur==='USD'?t.orig:'',t.cur==='USD'?t.rate:'',t.grp?'Yes':'']);
+    rows.push([t.date,t.merchant,t.amount,t.cat?catName(t.cat):'(needs a category)',(c&&c.g)||'',t.from==='shared'?'Shared account':'My card or cash',rc.has(t.id)?'Yes':'',t.cur==='USD'?'USD':'',t.cur==='USD'?t.orig:'',t.cur==='USD'?t.rate:'',t.grp?'Yes':'',t.cur==='USD'?t.orig:(dayRate(t.date)?Math.round(t.amount/dayRate(t.date)*100)/100:'')]);
   });
   const text='\ufeff'+rows.map(r=>r.map(q).join(',')).join('\r\n');
   dl('budget-ledger-transactions-'+today()+'.csv',new Blob([text],{type:'text/csv'}),ok=>{if(ok)toast('Spreadsheet saved ('+S.tx.length+' transactions)')});
@@ -723,7 +789,7 @@ function dueCard(){
   const d=dueList();if(!d.length)return '';
   return '<h3 style="font-weight:500;margin:0 0 6px">Due this month</h3><div class="card">'+d.map(r=>{
     const usd=r.cur==='USD';
-    return '<div class="tx" style="cursor:default;flex-direction:column;gap:8px"><div class="row"><div class="grow m">'+esc(r.name)+'</div><span class="mut">'+esc(catName(r.cat))+' · day '+r.day+'</span></div><div class="row"><input style="width:110px" id="rc_a_'+r.id+'" inputmode="decimal" value="'+r.amount+'" aria-label="Amount">'+(usd?'<input style="width:90px" id="rc_r_'+r.id+'" inputmode="decimal" placeholder="Rate" value="'+(S.rate||'')+'" aria-label="Exchange rate">':'')+'<span class="mut">'+(usd?'$ and rate':'yen')+'</span><span class="grow"></span><button class="pri" onclick="A.recAdd(\''+r.id+'\')">Add</button><button onclick="A.recSkip(\''+r.id+'\')">Skip</button></div></div>';
+    return '<div class="tx" style="cursor:default;flex-direction:column;gap:8px"><div class="row"><div class="grow m">'+esc(r.name)+'</div><span class="mut">'+esc(catName(r.cat))+' · day '+r.day+'</span></div><div class="row"><input style="width:110px" id="rc_a_'+r.id+'" inputmode="decimal" value="'+r.amount+'" aria-label="Amount">'+(usd?'<input style="width:90px" id="rc_r_'+r.id+'" inputmode="decimal" placeholder="Rate" value="'+(S.rate||'')+'" oninput="this.dataset.t=1" aria-label="Exchange rate">':'')+'<span class="mut">'+(usd?'$ and rate':'yen')+'</span><span class="grow"></span><button class="pri" onclick="A.recAdd(\''+r.id+'\')">Add</button><button onclick="A.recSkip(\''+r.id+'\')">Skip</button></div></div>';
   }).join('')+'</div>';
 }
 A.recAdd=id=>{
@@ -732,6 +798,14 @@ A.recAdd=id=>{
   const tx={id:uid(),date:S.month+'-'+pad(Math.min(r.day,dim(S.month))),merchant:r.name,amount:Math.round(a),cat:r.cat,from:r.from};
   if(r.cur==='USD'){const rate=num($('#rc_r_'+id).value);if(!rate){toast('Enter the exchange rate.');return}tx.amount=Math.round(a*rate);tx.cur='USD';tx.orig=a;tx.rate=rate;S.rate=rate}
   S.tx.push(tx);S.recurDone[id+'|'+S.month]=tx.id;save();render();toast('Added '+r.name);
+};
+A.dueRates=()=>{
+  dueList().filter(r=>r.cur==='USD').forEach(async r=>{
+    let d=S.month+'-'+pad(Math.min(r.day,dim(S.month)));if(d>today())d=today();
+    let v=dayRate(d);
+    if(!v&&!rateTried['d'+d]){rateTried['d'+d]=1;await fetchRates(d);v=dayRate(d)}
+    const inp=$('#rc_r_'+r.id);if(v&&inp&&!inp.dataset.t)inp.value=v;
+  });
 };
 A.recSkip=id=>{S.recurDone[id+'|'+S.month]='skip';save();render()};
 function recurSection(){
