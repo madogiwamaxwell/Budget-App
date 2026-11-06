@@ -77,6 +77,7 @@ nav button.on{color:var(--acc);font-weight:500}
 .banner{background:var(--warnbg);color:var(--warn);border-radius:8px;padding:8px 12px;margin:0 0 12px;font-size:13px}
 .sub{display:flex;justify-content:space-between;padding:6px 12px 6px 24px;font-size:12px;color:var(--mut);cursor:pointer}
 .empty{text-align:center;color:var(--mut);padding:28px 12px}
+[hidden]{display:none!important}
 </style>
 </head>
 <body>
@@ -88,6 +89,7 @@ nav button.on{color:var(--acc);font-weight:500}
 <input type="file" id="restore" accept=".json,application/json" hidden onchange="A.restore(this)">
 <script>
 const LS='budgetLedger.v1';
+const APP_VERSION='6';
 const MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -120,7 +122,7 @@ const DEFAULT_RULES=[
 ['amazonプライム','prime'],['amazon prime','prime'],['spotify','spotify'],['bunpro','bunpro'],['claude','claude'],['anthropic','claude']
 ].map(a=>({p:a[0],c:a[1]}));
 
-let S=load()||{cats:DEFAULT_CATS,rules:DEFAULT_RULES,tx:[],budgets:{},income:{},shared:{},receipts:[],month:ym(new Date()),lastBackup:0};
+let S=fix(load()||{cats:DEFAULT_CATS,rules:DEFAULT_RULES,tx:[],budgets:{},income:{},shared:{},receipts:[],month:ym(new Date()),lastBackup:0});
 let ui={tab:'ledger',scope:'my',q:'',open:null,collapsed:{},preview:null};
 function load(){try{const r=localStorage.getItem(LS);return r?JSON.parse(r):null}catch(e){return null}}
 function save(){try{localStorage.setItem(LS,JSON.stringify(S))}catch(e){toast('Could not save. Storage may be full.')}schedSnap()}
@@ -131,7 +133,7 @@ let snapT=0;
 function schedSnap(){clearTimeout(snapT);snapT=setTimeout(()=>snapNow(''),1500)}
 async function snapNow(label){
   try{
-    if(!S.tx.length&&!Object.keys(S.budgets).length&&!Object.keys(S.income).length)return;
+    if(!S.tx.length&&!S.sav.length&&!Object.keys(S.budgets).length&&!Object.keys(S.income).length)return;
     const now=Date.now(),k=label?'pre-'+now:today();
     await sreq('readwrite',st=>st.put({k:k,t:now,label:label,n:S.tx.length,state:JSON.stringify(S)}));
     await pruneSnaps();
@@ -186,9 +188,10 @@ function splitFields(s){
   if(/^[^,]*,[^,]*,/.test(s)&&!/\s{2,}/.test(s))return csvSplit(s);
   return s.split(/\s{2,}/).map(x=>x.trim()).filter(Boolean);
 }
+const isNeg=t=>/^[-\u2212]/.test(String(t).replace(/[¥円\s]/g,''));
 function parseStatement(text){
   const out=[];let pend=null;
-  const push=(date,mer,amt)=>{mer=String(mer).replace(/\s+/g,' ').trim();if(date&&mer&&amt>0)out.push({date:date,merchant:mer,amount:amt})};
+  const push=(date,mer,amt,neg)=>{mer=String(mer).replace(/\s+/g,' ').trim();if(date&&mer&&amt>0)out.push({date:date,merchant:mer,amount:amt,neg:!!neg})};
   const tail=/^(.*?)\s+(-?[\d,\u2212]+)\s*円?$/;
   for(const raw of text.split(/\r?\n/)){
     const line=raw.normalize('NFKC').trim();if(!line)continue;
@@ -199,11 +202,11 @@ function parseStatement(text){
       const toks=splitFields(rest);
       const mi=toks.findIndex(t=>HAS_TEXT.test(t));
       if(mi>=0){
-        const mer=toks[mi];let amt=null;
-        for(let k=mi+1;k<toks.length;k++){const a=parseAmt(toks[k]);if(a!==null){amt=a;break}}
-        if(amt!==null){push(date,mer,amt);pend=null;continue}
+        const mer=toks[mi];let amt=null,ng=false;
+        for(let k=mi+1;k<toks.length;k++){const a=parseAmt(toks[k]);if(a!==null){amt=a;ng=isNeg(toks[k]);break}}
+        if(amt!==null){push(date,mer,amt,ng);pend=null;continue}
         const tm=mer.match(tail);
-        if(tm&&parseAmt(tm[2])!==null&&HAS_TEXT.test(tm[1])){push(date,tm[1],parseAmt(tm[2]));pend=null;continue}
+        if(tm&&parseAmt(tm[2])!==null&&HAS_TEXT.test(tm[1])){push(date,tm[1],parseAmt(tm[2]),isNeg(tm[2]));pend=null;continue}
         pend={date:date,merchant:mer};continue;
       }
       pend={date:date};continue;
@@ -211,10 +214,10 @@ function parseStatement(text){
     if(pend){
       if(!pend.merchant){
         const tm=line.match(tail);
-        if(tm&&parseAmt(tm[2])!==null&&HAS_TEXT.test(tm[1])){push(pend.date,tm[1],parseAmt(tm[2]));pend=null;continue}
+        if(tm&&parseAmt(tm[2])!==null&&HAS_TEXT.test(tm[1])){push(pend.date,tm[1],parseAmt(tm[2]),isNeg(tm[2]));pend=null;continue}
         if(HAS_TEXT.test(line)){pend.merchant=line;continue}
       }else{
-        const a=parseAmt(line);if(a!==null){push(pend.date,pend.merchant,a);pend=null;continue}
+        const a=parseAmt(line);if(a!==null){push(pend.date,pend.merchant,a,isNeg(line));pend=null;continue}
       }
     }
   }
@@ -226,6 +229,34 @@ const monthTx=(m,sc)=>S.tx.filter(t=>t.date.startsWith(m)&&(sc==='shared'?t.from
 function actualBy(m,sc){const a={};monthTx(m,sc).forEach(t=>{const k=t.cat||'_none';a[k]=(a[k]||0)+t.amount});return a}
 function structure(){const out=[],seen={};S.cats.forEach(c=>{if(!c.g)out.push({leaf:c});else{if(!seen[c.g]){seen[c.g]={name:c.g,cats:[]};out.push(seen[c.g])}seen[c.g].cats.push(c)}});return out}
 const sum=a=>a.reduce((x,y)=>x+y,0);
+function fix(s){
+  if(!s.buckets)s.buckets=[1,2,3,4,5].map(i=>({id:'b'+i,name:'Bucket '+i}));
+  if(!s.sav)s.sav=[];
+  if(!s.recur)s.recur=[];
+  if(!s.recurDone)s.recurDone={};
+  if(!s.rate)s.rate=0;
+  return s;
+}
+const num=t=>{const n=parseFloat(String(t==null?'':t).replace(/[^\d.]/g,''));return isNaN(n)?0:n};
+const dim=m=>{const p=m.split('-').map(Number);return new Date(p[0],p[1],0).getDate()};
+function isDup(r){
+  const nm=norm(r.merchant);
+  if(S.tx.some(t=>t.date===r.date&&t.amount===r.amount&&norm(t.merchant)===nm))return true;
+  const g={};S.tx.forEach(t=>{if(t.grp&&t.date===r.date&&norm(t.merchant)===nm)g[t.grp]=(g[t.grp]||0)+t.amount});
+  return Object.values(g).some(v=>v===r.amount);
+}
+const bName=id=>{const b=S.buckets.find(x=>x.id===id);return b?b.name:'Deleted bucket'};
+const bBal=id=>sum(S.sav.filter(e=>e.bucket===id).map(e=>e.amount));
+function savMonth(m){const l=S.sav.filter(e=>!e.xfer&&e.date.startsWith(m));return{dep:sum(l.filter(e=>e.amount>0).map(e=>e.amount)),wd:-sum(l.filter(e=>e.amount<0).map(e=>e.amount))}}
+function monthStats(m){
+  const act=actualBy(m,'my'),inc=S.income[m]||0;
+  const rows=S.cats.map(c=>({c:c,b:eff(S.budgets[c.id],m)||0,a:act[c.id]||0}));
+  const none=act._none||0;
+  let totB=0,totA=0,miss=0;rows.forEach(r=>{totB+=r.b;totA+=r.a;miss+=Math.abs(r.b-r.a)});
+  totA+=none;miss+=none;
+  const sv=savMonth(m);
+  return{inc:inc,rows:rows,none:none,totB:totB,totA:totA,miss:miss,acc:totB>0?Math.max(0,Math.round((1-miss/totB)*100)):null,dep:sv.dep,wd:sv.wd,left:inc-totA-sv.dep+sv.wd};
+}
 
 function candidates(r){
   const taken=new Set(S.receipts.filter(x=>x.txId).map(x=>x.txId));
@@ -245,21 +276,25 @@ A.q=v=>{ui.q=v;render()};
 A.toggleGroup=g=>{ui.collapsed[g]=!ui.collapsed[g];render()};
 A.openCat=id=>{ui.open=ui.open===id?null:id;render()};
 A.setBudget=(id,v)=>{S.budgets[id]=S.budgets[id]||{};S.budgets[id][S.month]=parseInt(String(v).replace(/[^\d]/g,''),10)||0;save();render()};
+const fmtN=n=>n?Number(n).toLocaleString('en-US'):'';
+const prevInc=m=>S.income[addMonths(m,-1)]||0;
+function incHint(m,inc){const pv=prevInc(m);return(!inc&&pv)?'<p class="mut" style="margin:0 0 10px">No income set for '+monthLabel(m)+'. <a href="#" onclick="A.incPrev();return false" style="color:var(--acc)">Use last month\'s '+yen(pv)+'</a></p>':(!inc?'<p class="mut" style="margin:0 0 10px">No income set for '+monthLabel(m)+'. Income does not carry over, so enter it each month, or leave it at 0 for a month with no pay.</p>':'')}
+A.incPrev=()=>{S.income[S.month]=prevInc(S.month);save();render()};
 A.setIncome=v=>{S.income[S.month]=parseInt(String(v).replace(/[^\d]/g,''),10)||0;save();render()};
 A.setShared=v=>{S.shared[S.month]=parseInt(String(v).replace(/[^\d]/g,''),10)||0;save();render()};
 
 function header(){
-  const titles={ledger:'Ledger',month:'Month',trends:'Trends',receipts:'Receipts',settings:'Settings'};
-  const showM=['ledger','month','trends'].includes(ui.tab);
+  const titles={ledger:'Ledger',month:'Month',trends:'Trends',receipts:'Receipts',savings:'Savings',settings:'Settings'};
+  const showM=['ledger','month','trends','savings'].includes(ui.tab);
   return '<header><h1>'+titles[ui.tab]+'</h1>'+(showM?'<div class="mn"><button aria-label="Previous month" onclick="A.month(-1)">‹</button><b>'+monthLabel(S.month)+'</b><button aria-label="Next month" onclick="A.month(1)">›</button></div>':'')+'</header>';
 }
 function nav(){
-  const t=[['ledger','Ledger'],['month','Month'],['trends','Trends'],['receipts','Receipts'],['settings','Settings']];
+  const t=[['ledger','Ledger'],['month','Month'],['trends','Trends'],['savings','Savings'],['receipts','Receipts'],['settings','Settings']];
   return '<nav>'+t.map(x=>'<button class="'+(ui.tab===x[0]?'on':'')+'" onclick="A.tab(\''+x[0]+'\')">'+x[1]+'</button>').join('')+'</nav>';
 }
 function render(){
-  const v={ledger:viewLedger,month:viewMonth,trends:viewTrends,receipts:viewReceipts,settings:viewSettings}[ui.tab]();
-  const fab=(ui.tab==='ledger')?'<button class="fab" aria-label="Add transaction" onclick="A.editTx()">+</button>':'';
+  const v={ledger:viewLedger,month:viewMonth,trends:viewTrends,savings:viewSavings,receipts:viewReceipts,settings:viewSettings}[ui.tab]();
+  const fab=(ui.tab==='ledger')?'<button class="fab" aria-label="Add transaction" onclick="A.editTx()">+</button>':(ui.tab==='savings')?'<button class="fab" aria-label="Add savings entry" onclick="A.savEntry(\'\')">+</button>':'';
   $('#app').innerHTML=header()+'<main>'+v+'</main>'+fab+nav();
   hydrate();
 }
@@ -274,36 +309,61 @@ function viewLedger(){
   let h='';
   if(S.tx.length&&days>7)h+='<div class="banner">No backup file saved in the last 7 days. Open Settings and export one.</div>';
   if(need)h+='<div class="banner">'+need+' transaction'+(need>1?'s':'')+' need a category. Tap them to set one.</div>';
+  h+=dueCard();
   h+='<div class="row" style="margin:0 0 12px"><input class="grow" placeholder="Search merchant or category" value="'+esc(ui.q)+'" onchange="A.q(this.value)"><button onclick="A.openImport()">Import</button></div>';
   if(!list.length)return h+'<div class="empty">No transactions in '+monthLabel(m)+'.<br>Tap + to add one, or Import to paste a statement.</div>';
   const tot=sum(list.filter(t=>t.from!=='shared').map(t=>t.amount));
   h+='<p class="mut" style="margin:0 0 8px">'+list.length+' transactions · '+yen(tot)+' from your own spending</p><div class="card">';
   list.forEach(t=>{
     const rc=recFor(t.id).length;
-    h+='<div class="tx" onclick="A.editTx(\''+t.id+'\')"><div class="grow"><div class="m">'+esc(t.merchant)+'</div><div class="mut">'+t.date.slice(5).replace('-','/')+' · <span class="chip'+(t.cat?'':' w')+'">'+esc(catName(t.cat))+'</span>'+(t.from==='shared'?'<span class="chip o">Shared</span>':'')+(rc?'<span class="chip">Receipt</span>':'')+'</div></div><div style="white-space:nowrap">'+yen(t.amount)+'</div></div>';
+    h+='<div class="tx" onclick="A.editTx(\''+t.id+'\')"><div class="grow"><div class="m">'+esc(t.merchant)+'</div><div class="mut">'+t.date.slice(5).replace('-','/')+' · <span class="chip'+(t.cat?'':' w')+'">'+esc(catName(t.cat))+'</span>'+(t.from==='shared'?'<span class="chip o">Shared</span>':'')+(t.grp?'<span class="chip">Split</span>':'')+(t.cur==='USD'?'<span class="chip">$'+t.orig+'</span>':'')+(rc?'<span class="chip">Receipt</span>':'')+'</div></div><div style="white-space:nowrap">'+yen(t.amount)+'</div></div>';
   });
   return h+'</div>';
 }
 
 A.editTx=id=>{
-  const t=id?S.tx.find(x=>x.id===id):{id:'',date:today(),merchant:'',amount:'',cat:'',from:'mine'};
-  const rc=id?recFor(id):[];
+  const t=id?S.tx.find(x=>x.id===id):{id:'',date:today(),merchant:'',amount:'',cat:'',from:'mine',cur:'',orig:0,rate:0};
+  const rc=id?recFor(id):[],usd=t.cur==='USD';
+  const recent=[...new Set(S.tx.slice().sort((x,y)=>y.date.localeCompare(x.date)).map(x=>x.merchant))].slice(0,80);
   modal('<h3>'+(id?'Edit transaction':'Add transaction')+'</h3>'+
   '<label>Date</label><input type="date" id="f_date" value="'+t.date+'">'+
-  '<label>Merchant</label><input id="f_mer" value="'+esc(t.merchant)+'" oninput="A.suggest()">'+
-  '<label>Amount (yen)</label><input id="f_amt" inputmode="numeric" value="'+(t.amount||'')+'">'+
+  '<label>Merchant</label><input id="f_mer" list="merlist" autocomplete="off" value="'+esc(t.merchant)+'" oninput="A.suggest()"><datalist id="merlist">'+recent.map(x=>'<option value="'+esc(x)+'">').join('')+'</datalist>'+
+  '<label>Currency</label><select id="f_cur" onchange="A.curChg()"><option value="JPY">Yen (¥)</option><option value="USD"'+(usd?' selected':'')+'>US dollars ($)</option></select>'+
+  '<label id="f_al">'+(usd?'Amount (US dollars)':'Amount (yen)')+' · use a minus sign for a refund</label><input id="f_amt" inputmode="decimal" value="'+(usd?t.orig:(t.amount||''))+'" oninput="A.conv()">'+
+  '<div id="f_rb"'+(usd?'':' hidden')+'><label>Exchange rate (yen per $1)</label><input id="f_rate" inputmode="decimal" value="'+(usd?t.rate:'')+'" oninput="A.conv()"><p class="mut" id="f_cv"></p></div>'+
   '<label>Category</label><select id="f_cat">'+catOpts(t.cat,true)+'</select>'+
   '<label>Paid from</label><select id="f_from"><option value="mine"'+(t.from!=='shared'?' selected':'')+'>My card or cash</option><option value="shared"'+(t.from==='shared'?' selected':'')+'>Shared account</option></select>'+
   '<label><input type="checkbox" id="f_rem" checked style="width:auto"> Remember this merchant for next time</label>'+
+  (t.grp?'<p class="mut">This is one part of a split purchase.</p>':'')+
   (rc.length?'<div>'+rc.map(r=>'<img class="th" data-pid="'+r.id+'" onclick="A.viewReceipt(\''+r.id+'\')" alt="Receipt">').join('')+'</div>':'')+
-  '<div class="row" style="margin-top:14px"><button class="pri grow" onclick="A.saveTx(\''+(id||'')+'\')">Save</button>'+(id?'<button class="dng" onclick="A.delTx(\''+id+'\')">Delete</button>':'')+'<button onclick="closeModal()">Cancel</button></div>');
+  '<div class="row" style="margin-top:14px"><button class="pri grow" onclick="A.saveTx(\''+(id||'')+'\')">Save</button>'+(id?'<button onclick="A.split(\''+id+'\')">'+(t.grp?'Edit split':'Split')+'</button><button class="dng" onclick="A.delTx(\''+id+'\')">Delete</button>':'')+'<button onclick="closeModal()">Cancel</button></div>');
+  A.conv();
 };
-A.suggest=()=>{const c=autoCat($('#f_mer').value);const s=$('#f_cat');if(c&&!s.value)s.value=c};
+A.curChg=()=>{const u=$('#f_cur').value==='USD';$('#f_rb').hidden=!u;$('#f_al').textContent=(u?'Amount (US dollars)':'Amount (yen)')+' · use a minus sign for a refund';if(u&&!$('#f_rate').value&&S.rate)$('#f_rate').value=S.rate;A.conv()};
+A.conv=()=>{const e=$('#f_cv');if(!e||$('#f_cur').value!=='USD')return;const a=Math.abs(num($('#f_amt').value)),r=num($('#f_rate').value);e.textContent=(a&&r)?'Counts as '+yen(Math.round(a*r))+' in your budget.':'Enter the exchange rate to see the yen amount.'};
+A.suggest=()=>{
+  const v=$('#f_mer').value,n=norm(v);if(!n)return;
+  const last=S.tx.filter(t=>norm(t.merchant)===n).sort((a,b)=>b.date.localeCompare(a.date))[0];
+  const sel=$('#f_cat');if(!sel.value){const c=autoCat(v)||(last&&last.cat);if(c)sel.value=c}
+  if(last&&!$('#f_amt').value){
+    $('#f_from').value=last.from==='shared'?'shared':'mine';
+    if(last.cur==='USD'){$('#f_cur').value='USD';A.curChg();$('#f_amt').value=last.orig;$('#f_rate').value=last.rate;A.conv()}
+    else $('#f_amt').value=last.amount;
+  }
+};
 A.saveTx=id=>{
-  const date=$('#f_date').value,mer=$('#f_mer').value.trim(),amt=parseAmt($('#f_amt').value),cat=$('#f_cat').value,from=$('#f_from').value;
-  if(!date||!mer||!amt){toast('Enter a date, merchant, and amount.');return}
-  if(id){const t=S.tx.find(x=>x.id===id);Object.assign(t,{date:date,merchant:mer,amount:amt,cat:cat,from:from})}
-  else S.tx.push({id:uid(),date:date,merchant:mer,amount:amt,cat:cat,from:from});
+  const date=$('#f_date').value,mer=$('#f_mer').value.trim(),cat=$('#f_cat').value,from=$('#f_from').value,cur=$('#f_cur').value;
+  let amt,extra;
+  if(cur==='USD'){
+    const sg=/^\s*[-\u2212]/.test($('#f_amt').value)?-1:1,usd=sg*num($('#f_amt').value),rate=num($('#f_rate').value);
+    if(!date||!mer||!usd||!rate){toast('Enter a date, merchant, dollar amount and exchange rate.');return}
+    amt=Math.round(usd*rate);extra={cur:'USD',orig:usd,rate:rate};S.rate=rate;
+  }else{
+    amt=parseAmt($('#f_amt').value);if(amt&&/^\s*[-\u2212]/.test($('#f_amt').value))amt=-Math.abs(amt);extra={cur:'',orig:0,rate:0};
+    if(!date||!mer||!amt){toast('Enter a date, merchant, and amount.');return}
+  }
+  if(id){const t=S.tx.find(x=>x.id===id);Object.assign(t,{date:date,merchant:mer,amount:amt,cat:cat,from:from},extra)}
+  else S.tx.push(Object.assign({id:uid(),date:date,merchant:mer,amount:amt,cat:cat,from:from},extra));
   if(cat&&$('#f_rem').checked&&!autoCat(mer))S.rules.push({p:ruleKey(mer),c:cat});
   save();closeModal();render();
 };
@@ -322,13 +382,16 @@ A.readFile=async inp=>{
 A.previewImport=()=>{
   const rows=parseStatement($('#imp').value),from=$('#imp_from').value;
   if(!rows.length){toast('No transactions found. Check that each line has a date, merchant, and amount.');return}
-  rows.forEach(r=>{r.cat=autoCat(r.merchant);r.dup=S.tx.some(t=>t.date===r.date&&t.amount===r.amount&&norm(t.merchant)===norm(r.merchant));r.inc=!r.dup});
+  const nn=rows.filter(r=>r.neg).length;
+  if(nn>rows.length/2){rows.forEach(r=>{if(!r.neg){r.credit=true;r.amount=-r.amount}})}
+  else{rows.forEach(r=>{if(r.neg){r.refund=true;r.amount=-r.amount}})}
+  rows.forEach(r=>{r.cat=autoCat(r.merchant);r.dup=isDup(r);r.inc=!r.dup&&!r.credit});
   ui.preview={rows:rows,from:from};showPreview();
 };
 function showPreview(){
   const p=ui.preview,n=p.rows.filter(r=>r.inc).length;
-  modal('<h3>Review '+p.rows.length+' transactions</h3><p class="mut">Rows already in your ledger are unchecked. Pick a category for anything flagged.</p><div class="card">'+
-  p.rows.map((r,i)=>'<div class="tx" style="cursor:default;flex-direction:column;gap:6px"><div class="row"><input type="checkbox" style="width:auto" '+(r.inc?'checked':'')+' onchange="A.pvChk('+i+',this.checked)"><div class="grow m">'+esc(r.merchant)+'</div><div>'+yen(r.amount)+'</div></div><div class="row"><span class="mut">'+r.date.slice(5).replace('-','/')+'</span>'+(r.dup?'<span class="chip w">Already added</span>':'')+'<select class="grow" onchange="A.pvCat('+i+',this.value)">'+catOpts(r.cat,true)+'</select></div></div>').join('')+'</div>'+
+  modal('<h3>Review '+p.rows.length+' transactions</h3><p class="mut">Rows already in your ledger, and money coming in, are unchecked. Refunds and money in are saved as negative amounts. Pick a category for anything flagged.</p><div class="card">'+
+  p.rows.map((r,i)=>'<div class="tx" style="cursor:default;flex-direction:column;gap:6px"><div class="row"><input type="checkbox" style="width:auto" '+(r.inc?'checked':'')+' onchange="A.pvChk('+i+',this.checked)"><div class="grow m">'+esc(r.merchant)+'</div><div>'+yen(r.amount)+'</div></div><div class="row"><span class="mut">'+r.date.slice(5).replace('-','/')+'</span>'+(r.dup?'<span class="chip w">Already added</span>':'')+(r.credit?'<span class="chip w">Money in</span>':'')+(r.refund?'<span class="chip o">Refund</span>':'')+'<select class="grow" onchange="A.pvCat('+i+',this.value)">'+catOpts(r.cat,true)+'</select></div></div>').join('')+'</div>'+
   '<label><input type="checkbox" id="pv_rem" checked style="width:auto"> Remember merchants I categorize</label>'+
   '<div class="row" style="margin-top:14px"><button class="pri grow" onclick="A.commitImport()">Add '+n+' transactions</button><button onclick="closeModal()">Cancel</button></div>');
 }
@@ -348,32 +411,29 @@ function viewMonth(){
   const seg='<div class="seg"><button class="'+(sc==='my'?'on':'')+'" onclick="A.scope(\'my\')">My spending</button><button class="'+(sc==='shared'?'on':'')+'" onclick="A.scope(\'shared\')">Shared account</button></div>';
   if(sc==='shared'){
     const spent=sum(Object.values(act)),inn=eff(S.shared,m)||0;
-    let h=seg+'<div class="met"><div><small>Contributions in</small><input inputmode="numeric" value="'+inn+'" onchange="A.setShared(this.value)"></div><div><small>Spent</small><b>'+yen(spent)+'</b></div><div><small>Balance</small><b class="'+(inn-spent<0?'wn':'')+'">'+yen(inn-spent)+'</b></div></div>';
+    let h=seg+'<div class="met"><div><small>Contributions in</small><input inputmode="numeric" value="'+fmtN(inn)+'" placeholder="0" onchange="A.setShared(this.value)"></div><div><small>Spent</small><b>'+yen(spent)+'</b></div><div><small>Balance</small><b class="'+(inn-spent<0?'wn':'')+'">'+yen(inn-spent)+'</b></div></div>';
     const rows=S.cats.filter(c=>act[c.id]).map(c=>'<tr><td>'+esc(c.name)+'</td><td>'+yen(act[c.id])+'</td></tr>').join('')+(act._none?'<tr><td class="wn">Needs a category</td><td>'+yen(act._none)+'</td></tr>':'');
     return h+(rows?'<div class="card"><table><thead><tr><th>Category</th><th>Actual</th></tr></thead><tbody>'+rows+'</tbody></table></div>':'<div class="empty">No shared-account spending in '+monthLabel(m)+'. Mark a transaction as paid from the shared account to see it here.</div>');
   }
-  const inc=eff(S.income,m)||0;
-  let totB=0,totA=0,miss=0;
+  const st=monthStats(m),inc=st.inc,totA=st.totA;
   const bOf=c=>eff(S.budgets[c.id],m)||0;
-  S.cats.forEach(c=>{const b=bOf(c),a=act[c.id]||0;totB+=b;totA+=a;miss+=Math.abs(b-a)});
-  if(act._none){totA+=act._none;miss+=act._none}
-  const accTxt=totB>0?Math.max(0,Math.round((1-miss/totB)*100))+'%':'–';
-  let h=seg+'<div class="met"><div><small>Income (tap to edit)</small><input inputmode="numeric" value="'+inc+'" onchange="A.setIncome(this.value)"></div><div><small>Spent</small><b>'+yen(totA)+'</b></div><div><small>Left to allocate</small><b class="'+(inc-totA<0?'wn':'')+'">'+yen(inc-totA)+'</b></div><div><small>Budget accuracy</small><b>'+accTxt+'</b></div></div>';
+  const accTxt=st.acc===null?'–':st.acc+'%';
+  let h=seg+'<div class="met"><div><small>Income (tap to edit)</small><input inputmode="numeric" value="'+fmtN(inc)+'" placeholder="0" onchange="A.setIncome(this.value)"></div><div><small>Spent</small><b>'+yen(totA)+'</b></div><div><small>Left to allocate</small><b class="'+(st.left<0?'wn':'')+'">'+yen(st.left)+'</b></div><div><small>Budget accuracy</small><b>'+accTxt+'</b></div><div><small>Saved this month</small><b>'+yen(st.dep-st.wd)+'</b></div><div><small>All savings</small><b>'+yen(sum(S.buckets.map(b=>bBal(b.id))))+'</b></div></div>'+incHint(m,inc)+'<div class="row" style="margin:0 0 12px"><button class="grow" onclick="A.summary()">Month summary</button><button class="grow" onclick="A.allocate()">Allocate savings</button></div>';
   const line=(c,ind)=>{
-    const b=bOf(c),a=act[c.id]||0,left=b-a,pct=b>0?Math.min(100,a/b*100):(a>0?100:0);
-    let r='<tr><td class="'+(ind?'ind':'')+'">'+esc(c.name)+'</td><td><input inputmode="numeric" value="'+(b||'')+'" placeholder="0" onchange="A.setBudget(\''+c.id+'\',this.value)"></td><td onclick="A.openCat(\''+c.id+'\')" style="cursor:pointer;text-decoration:underline dotted">'+(a?yen(a):'–')+'</td><td class="'+(left<0?'wn':'')+'">'+((b||a)?yen(left):'')+'</td><td><div class="bar"><i style="width:'+pct+'%;background:var(--'+(a>b?'warn':'ok')+')"></i></div></td></tr>';
+    const b=bOf(c),a=act[c.id]||0,left=b-a,pct=b>0?Math.max(0,Math.min(100,a/b*100)):(a>0?100:0);
+    let r='<tr><td class="'+(ind?'ind':'')+'" onclick="A.editCat(\''+c.id+'\')" style="cursor:pointer">'+esc(c.name)+'</td><td><input inputmode="numeric" value="'+fmtN(b)+'" placeholder="0" onchange="A.setBudget(\''+c.id+'\',this.value)"></td><td onclick="A.openCat(\''+c.id+'\')" style="cursor:pointer;text-decoration:underline dotted">'+(a?yen(a):'–')+'</td><td class="'+(left<0?'wn':'')+'">'+((b||a)?yen(left):'')+'</td><td><div class="bar"><i style="width:'+pct+'%;background:var(--'+(a>b?'warn':'ok')+')"></i></div></td></tr>';
     if(ui.open===c.id)r+='<tr><td colspan="5" style="padding:0">'+monthTx(m,sc).filter(t=>t.cat===c.id).sort((x,y)=>y.date.localeCompare(x.date)).map(t=>'<div class="sub" onclick="A.editTx(\''+t.id+'\')"><span>'+t.date.slice(5).replace('-','/')+' '+esc(t.merchant)+'</span><span>'+yen(t.amount)+'</span></div>').join('')+'</td></tr>';
     return r;
   };
   let body='';
-  structure().forEach(s=>{
+  structure().forEach((s,si)=>{
     if(s.leaf){body+=line(s.leaf,false);return}
     const gb=sum(s.cats.map(bOf)),ga=sum(s.cats.map(c=>act[c.id]||0)),col=ui.collapsed[s.name];
-    body+='<tr class="g" onclick="A.toggleGroup(\''+s.name+'\')"><td>'+(col?'▸ ':'▾ ')+esc(s.name)+'</td><td>'+(gb?yen(gb):'–')+'</td><td>'+(ga?yen(ga):'–')+'</td><td class="'+(gb-ga<0?'wn':'')+'">'+((gb||ga)?yen(gb-ga):'')+'</td><td></td></tr>';
+    body+='<tr class="g" onclick="A.toggleGroup(\''+jq(s.name)+'\')"><td>'+(col?'▸ ':'▾ ')+esc(s.name)+' <span onclick="event.stopPropagation();A.editGroup('+si+')" style="padding:4px 8px" aria-label="Edit group">✎</span></td><td>'+(gb?yen(gb):'–')+'</td><td>'+(ga?yen(ga):'–')+'</td><td class="'+(gb-ga<0?'wn':'')+'">'+((gb||ga)?yen(gb-ga):'')+'</td><td></td></tr>';
     if(!col)s.cats.forEach(c=>body+=line(c,true));
   });
   if(act._none)body+='<tr><td class="wn">Needs a category</td><td></td><td>'+yen(act._none)+'</td><td></td><td></td></tr>';
-  return h+'<div class="card" style="overflow-x:auto"><table><thead><tr><th>Category</th><th>Budget</th><th>Actual</th><th>Left</th><th>Progress</th></tr></thead><tbody>'+body+'</tbody></table></div><p class="mut">Budgets carry forward each month until you change them. Tap an actual to see its transactions.</p>';
+  return h+'<div class="card" style="overflow-x:auto"><table><thead><tr><th>Category</th><th>Budget</th><th>Actual</th><th>Left</th><th>Progress</th></tr></thead><tbody>'+body+'</tbody></table></div><p class="mut">Budgets carry forward each month until you change them. Tap an actual to see its transactions. Tap a category name to rename, move or delete it, or ✎ on a group to edit the group.</p><div class="row"><button onclick="A.newCat()">Add a category</button></div>';
 }
 
 function viewTrends(){
@@ -447,9 +507,12 @@ function viewSettings(){
   let h='<h3 style="font-weight:500;margin:4px 0 6px">Category rules</h3><p class="mut">If a merchant name contains the text on the left, it gets the category on the right. Longer matches win.</p><div class="card">';
   h+=S.rules.map((r,i)=>'<div class="tx" style="cursor:default"><div class="grow m">'+esc(r.p)+'</div><select style="width:46%" onchange="A.ruleCat('+i+',this.value)">'+catOpts(r.c)+'</select><button class="dng" aria-label="Delete rule" onclick="A.delRule('+i+')">×</button></div>').join('');
   h+='</div><div class="row"><input class="grow" id="nr_p" placeholder="Merchant text"><select id="nr_c" class="grow">'+catOpts('',true)+'</select><button onclick="A.addRule()">Add rule</button></div>';
-  h+='<h3 style="font-weight:500;margin:22px 0 6px">Add a category</h3><div class="row"><input class="grow" id="nc_n" placeholder="Name"><select id="nc_g" class="grow"><option value="">No group</option>'+[...new Set(S.cats.map(c=>c.g).filter(Boolean))].map(g=>'<option>'+esc(g)+'</option>').join('')+'</select><button onclick="A.addCat()">Add</button></div>';
+  h+=catsSection();
+  h+=recurSection();
   h+='<h3 style="font-weight:500;margin:22px 0 6px">Backup file</h3><p class="mut">Your data lives on this device. Save a backup file to your Files app, Google Drive or iCloud Drive to keep a copy off the phone.'+(S.lastBackup?' Last saved: '+new Date(S.lastBackup).toLocaleDateString():' None saved yet.')+'</p><div class="row"><button class="pri" onclick="A.backup(true)">Save with photos</button><button onclick="A.backup(false)">Save without photos</button><button onclick="$(\'#restore\').click()">Restore from file</button><button onclick="A.pasteRestore()">Restore from pasted text</button></div><p class="mut" style="margin-top:12px">A spreadsheet copy of your transactions that opens in Excel or Google Sheets. It cannot be restored into the app, so keep a backup file as well.</p><div class="row"><button onclick="A.csv()">Download as spreadsheet</button></div>';
   h+='<h3 style="font-weight:500;margin:22px 0 6px">Version history</h3><p class="mut">A copy of your numbers is kept automatically: one per day for 30 days, then one per month for a year. Photos are not included. A restore keeps a copy of what you had just before it.</p><div id="snaplist"></div>';
+  h+='<h3 style="font-weight:500;margin:22px 0 6px">About this app</h3><p class="mut">Version '+APP_VERSION+'. <span id="persist"></span></p><div class="row"><button onclick="A.updateApp()">Update the app now</button></div><p class="mut">Loads the newest files and keeps all of your data. It needs a connection.</p>';
+  setTimeout(()=>{try{navigator.storage.persisted().then(v=>{const e=$('#persist');if(e)e.textContent=v?'Your phone has marked this app\'s data as protected.':'Your phone has not marked this app\'s data as protected, so keep backups.'})}catch(e){}},0);
   h+='<h3 style="font-weight:500;margin:22px 0 6px">Reset</h3><button class="dng" onclick="A.reset()">Erase all data</button>';
   setTimeout(()=>A.snaps(),0);
   return h;
@@ -457,7 +520,76 @@ function viewSettings(){
 A.ruleCat=(i,v)=>{S.rules[i].c=v;save()};
 A.delRule=i=>{S.rules.splice(i,1);save();render()};
 A.addRule=()=>{const p=$('#nr_p').value.trim(),c=$('#nr_c').value;if(!p||!c){toast('Enter merchant text and pick a category.');return}S.rules.push({p:p,c:c});save();render()};
-A.addCat=()=>{const n=$('#nc_n').value.trim(),g=$('#nc_g').value;if(!n)return;S.cats.push({id:'c_'+uid(),name:n,g:g});save();render()};
+const jq=t=>esc(String(t).replace(/\\/g,'\\\\').replace(/'/g,"\\'"));
+const groupsList=()=>[...new Set(S.cats.map(c=>c.g).filter(Boolean))];
+const groupOpts=sel=>'<option value="">No group</option>'+groupsList().map(g=>'<option value="'+esc(g)+'"'+(g===sel?' selected':'')+'>'+esc(g)+'</option>').join('');
+const flat=st=>{const o=[];st.forEach(e=>{if(e.leaf)o.push(e.leaf);else e.cats.forEach(c=>o.push(c))});return o};
+function catsSection(){
+  let h='<h3 id="catsec" style="font-weight:500;margin:22px 0 6px">Categories</h3><p class="mut">Tap a category or a group to rename, move or delete it.</p><div class="card">';
+  structure().forEach((e,i)=>{
+    if(e.leaf){h+='<div class="tx" onclick="A.editCat(\''+e.leaf.id+'\')"><div class="grow m">'+esc(e.leaf.name)+'</div><span class="mut">›</span></div>';return}
+    h+='<div class="tx" style="background:var(--accbg)" onclick="A.editGroup('+i+')"><div class="grow m"><b>'+esc(e.name)+'</b></div><span class="mut">Group ›</span></div>';
+    e.cats.forEach(c=>{h+='<div class="tx" style="padding-left:28px" onclick="A.editCat(\''+c.id+'\')"><div class="grow m">'+esc(c.name)+'</div><span class="mut">›</span></div>'});
+  });
+  return h+'</div><div class="row" style="margin-top:8px"><button onclick="A.newCat()">Add a category</button></div>';
+}
+A.newCat=()=>modal('<h3 style="margin:0 0 8px;font-weight:500">Add a category</h3><label>Name</label><input id="nc_n" placeholder="Name"><label>Group</label><select id="nc_g">'+groupOpts('')+'</select><label>Or a new group</label><input id="nc_ng" placeholder="New group name"><div class="row" style="margin-top:12px"><button class="pri" onclick="A.addCat()">Add</button><button onclick="closeModal()">Cancel</button></div>');
+A.addCat=()=>{const n=$('#nc_n').value.trim(),g=$('#nc_ng').value.trim()||$('#nc_g').value;if(!n){toast('Enter a name.');return}S.cats.push({id:'c_'+uid(),name:n,g:g});save();closeModal();render();toast('Category added')};
+A.editCat=id=>{
+  const c=catById(id);if(!c)return;
+  const n=S.tx.filter(t=>t.cat===id).length;
+  modal('<h3 style="margin:0 0 8px;font-weight:500">Edit category</h3><label>Name</label><input id="ec_n" value="'+esc(c.name)+'"><label>Group</label><select id="ec_g">'+groupOpts(c.g||'')+'</select><label>Or move to a new group</label><input id="ec_ng" placeholder="New group name"><div class="row" style="margin-top:12px"><button class="pri" onclick="A.saveCat(\''+id+'\')">Save</button><button onclick="A.moveCat(\''+id+'\',-1)">Move up ↑</button><button onclick="A.moveCat(\''+id+'\',1)">Move down ↓</button></div><div class="row" style="margin-top:12px"><button class="dng" onclick="A.delCat(\''+id+'\')">Delete</button><button onclick="closeModal()">Close</button></div><p class="mut">Deleting removes the category and its budget. '+n+' transaction'+(n===1?'':'s')+' in it will become uncategorized, and merchant rules for it are removed.</p>');
+};
+A.saveCat=id=>{
+  const c=catById(id);if(!c)return;
+  const n=$('#ec_n').value.trim();if(!n){toast('Enter a name.');return}
+  c.name=n;c.g=$('#ec_ng').value.trim()||$('#ec_g').value;
+  save();closeModal();render();toast('Saved');
+};
+A.moveCat=(id,dir)=>{
+  const c=catById(id);if(!c)return;
+  if(c.g){
+    const i=S.cats.indexOf(c);let j=i+dir;
+    while(j>=0&&j<S.cats.length&&S.cats[j].g!==c.g)j+=dir;
+    if(j<0||j>=S.cats.length){toast('It is already at the '+(dir<0?'top':'bottom')+' of its group.');return}
+    S.cats[i]=S.cats[j];S.cats[j]=c;
+  }else{
+    const st=structure(),i=st.findIndex(e=>e.leaf===c),j=i+dir;
+    if(j<0||j>=st.length){toast('It is already at the '+(dir<0?'top':'bottom')+'.');return}
+    const t=st[i];st[i]=st[j];st[j]=t;S.cats=flat(st);
+  }
+  save();render();
+};
+A.delCat=id=>{
+  if(!arm('dc'+id,'Tap Delete again to confirm.'))return;
+  S.tx.forEach(t=>{if(t.cat===id)t.cat=''});
+  S.rules=S.rules.filter(r=>r.c!==id);
+  delete S.budgets[id];
+  S.cats=S.cats.filter(c=>c.id!==id);
+  save();closeModal();render();toast('Category deleted');
+};
+A.editGroup=i=>{
+  const e=structure()[i];if(!e||e.leaf)return;
+  modal('<h3 style="margin:0 0 8px;font-weight:500">Edit group</h3><label>Name</label><input id="eg_n" value="'+esc(e.name)+'"><div class="row" style="margin-top:12px"><button class="pri" onclick="A.saveGroup('+i+')">Save</button><button onclick="A.moveGroup('+i+',-1)">Move up ↑</button><button onclick="A.moveGroup('+i+',1)">Move down ↓</button></div><div class="row" style="margin-top:12px"><button onclick="A.ungroup('+i+')">Ungroup</button><button onclick="closeModal()">Close</button></div><p class="mut">Ungroup keeps every category and takes them out of this group.</p>');
+};
+A.saveGroup=i=>{
+  const e=structure()[i];if(!e||e.leaf)return;
+  const n=$('#eg_n').value.trim();if(!n){toast('Enter a name.');return}
+  S.cats.forEach(c=>{if(c.g===e.name)c.g=n});
+  save();closeModal();render();toast('Saved');
+};
+A.moveGroup=(i,dir)=>{
+  const st=structure(),j=i+dir;
+  if(!st[i]||j<0||j>=st.length){toast('It is already at the '+(dir<0?'top':'bottom')+'.');return}
+  const t=st[i];st[i]=st[j];st[j]=t;S.cats=flat(st);
+  save();render();A.editGroup(j);
+};
+A.ungroup=i=>{
+  const e=structure()[i];if(!e||e.leaf)return;
+  if(!arm('ug'+i,'Tap Ungroup again to confirm.'))return;
+  S.cats.forEach(c=>{if(c.g===e.name)c.g=''});
+  save();closeModal();render();toast('Group removed');
+};
 const toDataURL=b=>new Promise(r=>{const f=new FileReader();f.onload=()=>r(f.result);f.readAsDataURL(b)});
 const taStyle='width:100%;height:150px;font:12px/1.3 monospace;background:var(--card);color:var(--tx);border:1px solid var(--bd);border-radius:8px;padding:8px';
 const dl=async(name,blob,done)=>{
@@ -491,10 +623,10 @@ A.copyBackup=async()=>{
 A.csv=async()=>{
   const q=v=>{v=String(v==null?'':v);return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
   const rc=new Set(S.receipts.filter(r=>r.txId).map(r=>r.txId));
-  const rows=[['Date','Merchant','Amount (JPY)','Category','Group','Paid from','Receipt photo']];
+  const rows=[['Date','Merchant','Amount (JPY)','Category','Group','Paid from','Receipt photo','Original currency','Original amount','Exchange rate','Split']];
   S.tx.slice().sort((a,b)=>a.date.localeCompare(b.date)).forEach(t=>{
     const c=t.cat?catById(t.cat):null;
-    rows.push([t.date,t.merchant,t.amount,t.cat?catName(t.cat):'(needs a category)',(c&&c.g)||'',t.from==='shared'?'Shared account':'My card or cash',rc.has(t.id)?'Yes':'']);
+    rows.push([t.date,t.merchant,t.amount,t.cat?catName(t.cat):'(needs a category)',(c&&c.g)||'',t.from==='shared'?'Shared account':'My card or cash',rc.has(t.id)?'Yes':'',t.cur==='USD'?'USD':'',t.cur==='USD'?t.orig:'',t.cur==='USD'?t.rate:'',t.grp?'Yes':'']);
   });
   const text='\ufeff'+rows.map(r=>r.map(q).join(',')).join('\r\n');
   dl('budget-ledger-transactions-'+today()+'.csv',new Blob([text],{type:'text/csv'}),ok=>{if(ok)toast('Spreadsheet saved ('+S.tx.length+' transactions)')});
@@ -509,12 +641,22 @@ A.applyBackup=async txt=>{
   try{
     const j=JSON.parse(txt);if(!j.state||!j.state.tx)throw 0;
     await snapNow('Before restore');
-    S=j.state;for(const id in (j.photos||{})){const b=await (await fetch(j.photos[id])).blob();await pPut(id,b)}
+    S=fix(j.state);for(const id in (j.photos||{})){const b=await (await fetch(j.photos[id])).blob();await pPut(id,b)}
     save();closeModal();render();toast('Backup restored');
   }catch(e){toast('That is not a valid backup.')}
 };
 A.restore=async inp=>{const f=inp.files[0];inp.value='';if(!f)return;A.applyBackup(await f.text())};
 A.pasteRestore=()=>modal('<h3 style="margin:0 0 4px;font-weight:500">Restore from text</h3><p class="mut">Paste the backup text you copied earlier. This replaces your current data, and a copy of the current data is kept in Version history.</p><textarea id="pr_t" placeholder="Paste here" style="'+taStyle+'"></textarea><div class="row" style="margin-top:10px"><button class="pri" onclick="A.applyBackup($(\'#pr_t\').value)">Restore</button><button onclick="closeModal()">Cancel</button></div>');
+A.updateApp=async()=>{
+  if(!navigator.serviceWorker||!window.caches){location.reload();return}
+  try{
+    toast('Checking for the newest version…');
+    const r=await fetch(location.pathname,{cache:'no-store'});if(!r.ok)throw 0;
+    for(const g of await navigator.serviceWorker.getRegistrations())await g.unregister();
+    for(const k of await caches.keys())await caches.delete(k);
+    location.reload();
+  }catch(e){toast('Could not reach the server. You need a connection to update.')}
+};
 A.snaps=async()=>{
   const box=$('#snaplist');if(!box)return;
   try{
@@ -528,7 +670,7 @@ A.restoreSnap=async k=>{
     const x=await sreq('readonly',st=>st.get(k));if(!x)return;
     if(!arm('s'+k,'Tap Restore again to confirm. Your current data is saved first.'))return;
     await snapNow('Before restore');
-    const lb=S.lastBackup;S=JSON.parse(x.state);S.lastBackup=lb;
+    const lb=S.lastBackup;S=fix(JSON.parse(x.state));S.lastBackup=lb;
     save();render();toast('Version restored');
   }catch(e){toast('Could not restore that version.')}
 };
@@ -536,6 +678,156 @@ A.reset=async()=>{
   if(!arm('reset','Tap Erase again to confirm. Your numbers stay in version history.'))return;
   await snapNow('Before erase');
   localStorage.removeItem(LS);S.receipts.forEach(r=>pDel(r.id));location.reload();
+};
+
+// ---------- Split purchases ----------
+A.split=id=>{
+  const t=S.tx.find(x=>x.id===id);if(!t)return;
+  let parts,ids;
+  if(t.grp){const g=S.tx.filter(x=>x.grp===t.grp);ids=g.map(x=>x.id);parts=g.map(x=>({cat:x.cat,amt:x.amount}))}
+  else{ids=[t.id];const h=Math.floor(t.amount/2);parts=[{cat:t.cat,amt:h},{cat:'',amt:t.amount-h}]}
+  ui.split={ids:ids,date:t.date,merchant:t.merchant,from:t.from,total:sum(parts.map(p=>p.amt)),parts:parts};
+  A.spDraw();
+};
+A.spDraw=()=>{
+  const s=ui.split;
+  modal('<h3>Split purchase</h3><p class="mut">'+esc(s.merchant)+' · '+s.date.slice(5).replace('-','/')+' · total '+yen(s.total)+'</p><div class="card">'+s.parts.map((p,i)=>'<div class="tx" style="cursor:default;gap:8px"><select class="grow" onchange="A.spCat('+i+',this.value)">'+catOpts(p.cat,true)+'</select><input style="width:96px" inputmode="numeric" value="'+(p.amt||'')+'" oninput="A.spAmt('+i+',this.value)" aria-label="Amount">'+(s.parts.length>2?'<button class="dng" onclick="A.spDel('+i+')" aria-label="Remove part">×</button>':'')+'</div>').join('')+'</div><p id="sp_rem" class="mut"></p><div class="row"><button onclick="A.spAdd()">Add a part</button>'+(s.ids.length>1?'<button onclick="A.spMerge()">Merge back into one</button>':'')+'</div><div class="row" style="margin-top:14px"><button class="pri grow" onclick="A.spSave()">Save split</button><button onclick="closeModal()">Cancel</button></div>');
+  A.spRem();
+};
+A.spRem=()=>{const s=ui.split,rem=s.total-sum(s.parts.map(p=>p.amt||0)),e=$('#sp_rem');if(!e)return;e.textContent=rem===0?'The parts add up to the total.':(rem>0?yen(rem)+' still to assign.':yen(-rem)+' over the total.');e.className=rem===0?'mut':'wn'};
+A.spCat=(i,v)=>{ui.split.parts[i].cat=v};
+A.spAmt=(i,v)=>{ui.split.parts[i].amt=parseAmt(v)||0;A.spRem()};
+A.spAdd=()=>{ui.split.parts.push({cat:'',amt:Math.max(0,ui.split.total-sum(ui.split.parts.map(p=>p.amt||0)))});A.spDraw()};
+A.spDel=i=>{ui.split.parts.splice(i,1);A.spDraw()};
+A.spSave=()=>{
+  const s=ui.split;
+  if(s.parts.some(p=>!p.amt)){toast('Every part needs an amount.');return}
+  if(sum(s.parts.map(p=>p.amt))!==s.total){toast('The parts must add up to '+yen(s.total)+'.');return}
+  const g=uid(),ids=new Set(s.ids),nid=s.parts.map(()=>uid());
+  S.tx=S.tx.filter(x=>!ids.has(x.id));
+  s.parts.forEach((p,i)=>S.tx.push({id:nid[i],date:s.date,merchant:s.merchant,amount:p.amt,cat:p.cat,from:s.from,grp:g}));
+  S.receipts.forEach(r=>{if(ids.has(r.txId))r.txId=nid[0]});
+  save();closeModal();render();toast('Split saved');
+};
+A.spMerge=()=>{
+  const s=ui.split,ids=new Set(s.ids),nid=uid();
+  S.tx=S.tx.filter(x=>!ids.has(x.id));
+  S.tx.push({id:nid,date:s.date,merchant:s.merchant,amount:s.total,cat:'',from:s.from});
+  S.receipts.forEach(r=>{if(ids.has(r.txId))r.txId=nid});
+  save();closeModal();render();toast('Merged. Choose a category for it.');
+};
+
+// ---------- Recurring entries ----------
+function dueList(){if(S.month>ym(new Date()))return[];return S.recur.filter(r=>r.start<=S.month&&!S.recurDone[r.id+'|'+S.month])}
+function dueCard(){
+  const d=dueList();if(!d.length)return '';
+  return '<h3 style="font-weight:500;margin:0 0 6px">Due this month</h3><div class="card">'+d.map(r=>{
+    const usd=r.cur==='USD';
+    return '<div class="tx" style="cursor:default;flex-direction:column;gap:8px"><div class="row"><div class="grow m">'+esc(r.name)+'</div><span class="mut">'+esc(catName(r.cat))+' · day '+r.day+'</span></div><div class="row"><input style="width:110px" id="rc_a_'+r.id+'" inputmode="decimal" value="'+r.amount+'" aria-label="Amount">'+(usd?'<input style="width:90px" id="rc_r_'+r.id+'" inputmode="decimal" placeholder="Rate" value="'+(S.rate||'')+'" aria-label="Exchange rate">':'')+'<span class="mut">'+(usd?'$ and rate':'yen')+'</span><span class="grow"></span><button class="pri" onclick="A.recAdd(\''+r.id+'\')">Add</button><button onclick="A.recSkip(\''+r.id+'\')">Skip</button></div></div>';
+  }).join('')+'</div>';
+}
+A.recAdd=id=>{
+  const r=S.recur.find(x=>x.id===id);if(!r)return;
+  const a=num($('#rc_a_'+id).value);if(!a){toast('Enter an amount.');return}
+  const tx={id:uid(),date:S.month+'-'+pad(Math.min(r.day,dim(S.month))),merchant:r.name,amount:Math.round(a),cat:r.cat,from:r.from};
+  if(r.cur==='USD'){const rate=num($('#rc_r_'+id).value);if(!rate){toast('Enter the exchange rate.');return}tx.amount=Math.round(a*rate);tx.cur='USD';tx.orig=a;tx.rate=rate;S.rate=rate}
+  S.tx.push(tx);S.recurDone[id+'|'+S.month]=tx.id;save();render();toast('Added '+r.name);
+};
+A.recSkip=id=>{S.recurDone[id+'|'+S.month]='skip';save();render()};
+function recurSection(){
+  let h='<h3 style="font-weight:500;margin:22px 0 6px">Recurring entries</h3><p class="mut">Set up rent, subscriptions and anything else that repeats. Each month they appear at the top of the Ledger, and you confirm them with one tap.</p>';
+  if(S.recur.length)h+='<div class="card">'+S.recur.map(r=>'<div class="tx" onclick="A.editRecur(\''+r.id+'\')"><div class="grow"><div class="m">'+esc(r.name)+'</div><div class="mut">'+esc(catName(r.cat))+' · day '+r.day+'</div></div><div>'+(r.cur==='USD'?'$'+r.amount:yen(r.amount))+'</div></div>').join('')+'</div>';
+  return h+'<div class="row"><button onclick="A.editRecur(\'\')">Add a recurring entry</button></div>';
+}
+A.editRecur=id=>{
+  const r=id?S.recur.find(x=>x.id===id):{name:'',amount:'',cat:'',from:'mine',day:1,cur:''};if(!r)return;
+  modal('<h3>'+(id?'Edit recurring entry':'Add a recurring entry')+'</h3><label>Name</label><input id="rr_n" value="'+esc(r.name)+'" placeholder="Rent"><label>Amount</label><input id="rr_a" inputmode="decimal" value="'+(r.amount||'')+'"><label>Currency</label><select id="rr_c"><option value="JPY">Yen (¥)</option><option value="USD"'+(r.cur==='USD'?' selected':'')+'>US dollars ($)</option></select><label>Category</label><select id="rr_cat">'+catOpts(r.cat,true)+'</select><label>Paid from</label><select id="rr_f"><option value="mine"'+(r.from!=='shared'?' selected':'')+'>My card or cash</option><option value="shared"'+(r.from==='shared'?' selected':'')+'>Shared account</option></select><label>Day of the month</label><input id="rr_d" inputmode="numeric" value="'+r.day+'"><div class="row" style="margin-top:14px"><button class="pri grow" onclick="A.saveRecur(\''+(id||'')+'\')">Save</button>'+(id?'<button class="dng" onclick="A.delRecur(\''+id+'\')">Delete</button>':'')+'<button onclick="closeModal()">Cancel</button></div>');
+};
+A.saveRecur=id=>{
+  const name=$('#rr_n').value.trim(),amount=num($('#rr_a').value),day=Math.min(31,Math.max(1,parseInt($('#rr_d').value,10)||1));
+  if(!name||!amount){toast('Enter a name and an amount.');return}
+  const v={name:name,amount:amount,cur:$('#rr_c').value==='USD'?'USD':'',cat:$('#rr_cat').value,from:$('#rr_f').value,day:day};
+  if(id)Object.assign(S.recur.find(x=>x.id===id),v);else S.recur.push(Object.assign({id:'r_'+uid(),start:ym(new Date())},v));
+  save();closeModal();render();toast('Saved');
+};
+A.delRecur=id=>{if(!arm('rr'+id,'Tap Delete again to confirm.'))return;S.recur=S.recur.filter(x=>x.id!==id);save();closeModal();render()};
+
+// ---------- Savings ----------
+const bOpts=sel=>S.buckets.map(b=>'<option value="'+b.id+'"'+(b.id===sel?' selected':'')+'>'+esc(b.name)+'</option>').join('');
+function viewSavings(){
+  const total=sum(S.buckets.map(b=>bBal(b.id))),sv=savMonth(S.month);
+  let h='<div class="met"><div><small>Total saved</small><b>'+yen(total)+'</b></div><div><small>Net this month</small><b>'+yen(sv.dep-sv.wd)+'</b></div></div>';
+  h+='<div class="card">'+(S.buckets.length?S.buckets.map(b=>'<div class="tx" onclick="A.editBucket(\''+b.id+'\')"><div class="grow m">'+esc(b.name)+'</div><div>'+yen(bBal(b.id))+'</div></div>').join(''):'<div class="empty">No buckets yet.</div>')+'</div><div class="row" style="margin:0 0 14px"><button onclick="A.newBucket()">Add a bucket</button></div>';
+  const list=S.sav.filter(e=>e.date.startsWith(S.month)).sort((a,b)=>b.date.localeCompare(a.date));
+  h+='<h3 style="font-weight:500;margin:0 0 6px">Entries in '+monthLabel(S.month)+'</h3>';
+  if(!list.length)return h+'<div class="empty">No savings entries this month.<br>Tap + to add a deposit, a withdrawal or a move, or use Allocate savings on the Month tab.</div>';
+  return h+'<div class="card">'+list.map(e=>'<div class="tx" onclick="A.savEntry(\''+e.id+'\')"><div class="grow"><div class="m">'+esc(e.note||(e.xfer?'Move':e.amount>0?'Deposit':'Withdrawal'))+'</div><div class="mut">'+e.date.slice(5).replace('-','/')+' · <span class="chip">'+esc(bName(e.bucket))+'</span>'+(e.xfer?'<span class="chip o">Move</span>':'')+'</div></div><div class="'+(e.amount>0?'ok':'wn')+'" style="white-space:nowrap">'+(e.amount>0?'+':'')+yen(e.amount)+'</div></div>').join('')+'</div>';
+}
+A.newBucket=()=>modal('<h3>Add a bucket</h3><label>Name</label><input id="bk_n" placeholder="Name"><div class="row" style="margin-top:12px"><button class="pri grow" onclick="A.addBucket()">Add</button><button onclick="closeModal()">Cancel</button></div>');
+A.addBucket=()=>{const n=$('#bk_n').value.trim();if(!n){toast('Enter a name.');return}S.buckets.push({id:'b_'+uid(),name:n});save();closeModal();render()};
+A.editBucket=id=>{
+  const b=S.buckets.find(x=>x.id===id);if(!b)return;const n=S.sav.filter(e=>e.bucket===id).length;
+  modal('<h3>Edit bucket</h3><label>Name</label><input id="bk_n" value="'+esc(b.name)+'"><p class="mut">Balance '+yen(bBal(id))+'</p><div class="row"><button class="pri grow" onclick="A.saveBucket(\''+id+'\')">Save</button><button class="dng" onclick="A.delBucket(\''+id+'\')">Delete</button><button onclick="closeModal()">Close</button></div><p class="mut">Deleting a bucket also deletes its '+n+' entr'+(n===1?'y':'ies')+'.</p>');
+};
+A.saveBucket=id=>{const n=$('#bk_n').value.trim();if(!n){toast('Enter a name.');return}S.buckets.find(x=>x.id===id).name=n;save();closeModal();render()};
+A.delBucket=id=>{if(!arm('bk'+id,'Tap Delete again to confirm.'))return;S.sav=S.sav.filter(e=>e.bucket!==id);S.buckets=S.buckets.filter(b=>b.id!==id);save();closeModal();render()};
+A.savEntry=id=>{
+  if(!S.buckets.length){toast('Add a bucket first.');return}
+  const e=id?S.sav.find(x=>x.id===id):null;
+  if(e&&e.xfer){
+    const pair=S.sav.filter(x=>x.xfer===e.xfer);
+    modal('<h3>Move between buckets</h3><p class="mut">'+e.date.slice(5).replace('-','/')+' · '+pair.map(x=>esc(bName(x.bucket))+' '+(x.amount>0?'+':'')+yen(x.amount)).join(', ')+'</p><div class="row"><button class="dng" onclick="A.delSav(\''+id+'\')">Delete</button><button onclick="closeModal()">Close</button></div>');return;
+  }
+  const dflt=S.month===ym(new Date())?today():S.month+'-01';
+  modal('<h3>'+(e?'Edit entry':'Savings entry')+'</h3>'+(e?'':'<label>What happened</label><select id="s_type" onchange="A.savType()"><option value="in">Deposit</option><option value="out">Withdrawal</option><option value="move">Move between buckets</option></select>')+
+  '<label>Date</label><input type="date" id="s_date" value="'+(e?e.date:dflt)+'"><label id="s_bl">Bucket</label><select id="s_b">'+bOpts(e?e.bucket:'')+'</select><div id="s_tobox" hidden><label>To bucket</label><select id="s_to">'+bOpts(S.buckets[1]?S.buckets[1].id:'')+'</select></div><label>Amount (yen)</label><input id="s_amt" inputmode="numeric" value="'+(e?Math.abs(e.amount):'')+'"><label>Note (optional)</label><input id="s_note" value="'+esc(e?e.note:'')+'">'+
+  '<div class="row" style="margin-top:14px"><button class="pri grow" onclick="A.saveSav(\''+(id||'')+'\')">Save</button>'+(e?'<button class="dng" onclick="A.delSav(\''+id+'\')">Delete</button>':'')+'<button onclick="closeModal()">Cancel</button></div>');
+};
+A.savType=()=>{const mv=$('#s_type').value==='move';$('#s_tobox').hidden=!mv;$('#s_bl').textContent=mv?'From bucket':'Bucket'};
+A.saveSav=id=>{
+  const e=id?S.sav.find(x=>x.id===id):null;
+  const type=e?(e.amount<0?'out':'in'):$('#s_type').value;
+  const date=$('#s_date').value,b=$('#s_b').value,amt=parseAmt($('#s_amt').value),note=$('#s_note').value.trim();
+  if(!date||!amt||amt<=0){toast('Enter a date and an amount.');return}
+  if(type==='move'){
+    const to=$('#s_to').value;if(to===b){toast('Pick two different buckets.');return}
+    const x=uid();S.sav.push({id:uid(),date:date,bucket:b,amount:-amt,note:note,xfer:x},{id:uid(),date:date,bucket:to,amount:amt,note:note,xfer:x});
+  }else if(e)Object.assign(e,{date:date,bucket:b,amount:(type==='out'?-amt:amt),note:note});
+  else S.sav.push({id:uid(),date:date,bucket:b,amount:(type==='out'?-amt:amt),note:note});
+  save();closeModal();render();
+};
+A.delSav=id=>{
+  if(!arm('sv'+id,'Tap Delete again to confirm.'))return;
+  const e=S.sav.find(x=>x.id===id);if(!e)return;
+  S.sav=e.xfer?S.sav.filter(x=>x.xfer!==e.xfer):S.sav.filter(x=>x.id!==id);
+  save();closeModal();render();
+};
+A.allocate=()=>{
+  if(!S.buckets.length){toast('Add a bucket first.');return}
+  ui.alloc={left:monthStats(S.month).left};
+  modal('<h3>Allocate savings</h3><p class="mut" id="al_l"></p>'+S.buckets.map(b=>'<label>'+esc(b.name)+' (now '+yen(bBal(b.id))+')</label><input id="al_'+b.id+'" inputmode="numeric" placeholder="0" oninput="A.alRem()">').join('')+'<div class="row" style="margin-top:14px"><button class="pri grow" onclick="A.alSave()">Save</button><button onclick="closeModal()">Cancel</button></div>');
+  A.alRem();
+};
+A.alRem=()=>{const t=sum(S.buckets.map(b=>parseAmt($('#al_'+b.id).value)||0)),r=ui.alloc.left-t,e=$('#al_l');e.textContent='Left to allocate: '+yen(ui.alloc.left)+' · after this: '+yen(r);e.className=r<0?'wn':'mut'};
+A.alSave=()=>{
+  const d=(S.month===ym(new Date()))?today():S.month+'-'+pad(dim(S.month));let n=0;
+  S.buckets.forEach(b=>{const a=parseAmt($('#al_'+b.id).value)||0;if(a>0){S.sav.push({id:uid(),date:d,bucket:b.id,amount:a,note:'Allocated from '+monthLabel(S.month)});n++}});
+  if(!n){toast('Enter an amount for at least one bucket.');return}
+  save();closeModal();render();toast('Saved to buckets');
+};
+
+// ---------- Month summary ----------
+A.summary=()=>{
+  const m=S.month,st=monthStats(m);
+  const over=st.rows.filter(r=>r.a>r.b).sort((x,y)=>(y.a-y.b)-(x.a-x.b)).slice(0,5);
+  const under=st.rows.filter(r=>r.b>r.a).sort((x,y)=>(y.b-y.a)-(x.b-x.a)).slice(0,5);
+  const nn=S.tx.filter(t=>t.date.startsWith(m)&&t.from!=='shared'&&!t.cat);
+  const li=(r,o)=>'<div class="tx" style="cursor:default"><div class="grow"><div class="m">'+esc(r.c.name)+'</div><div class="mut">'+yen(r.b)+' budget · '+yen(r.a)+' spent</div></div><div class="'+(o?'wn':'ok')+'" style="white-space:nowrap">'+yen(Math.abs(r.a-r.b))+(o?' over':' under')+'</div></div>';
+  modal('<h3>'+monthLabel(m)+' summary</h3><div class="met"><div><small>Budget accuracy</small><b>'+(st.acc===null?'–':st.acc+'%')+'</b></div><div><small>Left to allocate</small><b class="'+(st.left<0?'wn':'')+'">'+yen(st.left)+'</b></div><div><small>Budgeted</small><b>'+yen(st.totB)+'</b></div><div><small>Spent</small><b>'+yen(st.totA)+'</b></div></div><p class="mut">Accuracy shows how close your budget was to what you spent, category by category. Going over and going under both lower it.</p>'+
+  '<h3 style="margin:14px 0 6px">Furthest over budget</h3>'+(over.length?'<div class="card">'+over.map(r=>li(r,true)).join('')+'</div>':'<p class="mut">Nothing went over budget.</p>')+
+  '<h3 style="margin:14px 0 6px">Most left unspent</h3>'+(under.length?'<div class="card">'+under.map(r=>li(r,false)).join('')+'</div>':'<p class="mut">No unspent budget.</p>')+
+  (nn.length?'<p class="wn">'+nn.length+' transaction'+(nn.length>1?'s':'')+' ('+yen(sum(nn.map(t=>t.amount)))+') still need a category and count against accuracy.</p>':'')+
+  '<p class="mut">Savings this month: '+yen(st.dep)+' put in, '+yen(st.wd)+' taken out.</p><div class="row" style="margin-top:12px"><button class="pri grow" onclick="closeModal();A.allocate()">Allocate savings</button><button onclick="closeModal()">Close</button></div>');
 };
 
 if(typeof document!=='undefined'&&document.getElementById('app')){

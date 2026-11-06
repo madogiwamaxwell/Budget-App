@@ -1,5 +1,5 @@
 // Caches the app so it opens with no signal. Bump VERSION when index.html changes.
-const VERSION = 'ledger-v3';
+const VERSION = 'ledger-v6';
 const FILES = ['./', 'index.html', 'manifest.webmanifest', 'icon-180.png', 'icon-192.png', 'icon-512.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
